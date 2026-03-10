@@ -147,25 +147,23 @@ func (c *Client) QueryAdjustFactor(ctx context.Context, req *AdjustFactorRequest
 		return err
 	}
 
-	result := &struct {
-		ErrorCode string   `json:"-"`
-		ErrorMsg  string   `json:"-"`
-		Data      [][]string `json:"record"`
-	}{}
-
-	if err := parseStandardResponse(resp, result); err != nil {
-		return err
+	bodyParts := strings.Split(resp.Body, MessageSplit)
+	if len(bodyParts) < 7 {
+		return errors.New("无效的响应")
 	}
 
-	if result.ErrorCode != ErrSuccess {
-		return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
-	}
-
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
+	errorCode := bodyParts[0]
+	if errorCode != ErrSuccess {
+		errorMsg := ""
+		if len(bodyParts) > 1 {
+			errorMsg = bodyParts[1]
 		}
+		return &Error{Code: errorCode, Message: errorMsg}
+	}
+
+	// 流式解析 JSON 数据
+	if err := streamJsonRecords(bodyParts[6], callback); err != nil {
+		return err
 	}
 
 	return nil
@@ -203,25 +201,23 @@ func (c *Client) QueryPerformanceExpressReport(ctx context.Context, req *ReportD
 		return err
 	}
 
-	result := &struct {
-		ErrorCode string   `json:"-"`
-		ErrorMsg  string   `json:"-"`
-		Data      [][]string `json:"record"`
-	}{}
-
-	if err := parseStandardResponse(resp, result); err != nil {
-		return err
+	bodyParts := strings.Split(resp.Body, MessageSplit)
+	if len(bodyParts) < 7 {
+		return errors.New("无效的响应")
 	}
 
-	if result.ErrorCode != ErrSuccess {
-		return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
-	}
-
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
+	errorCode := bodyParts[0]
+	if errorCode != ErrSuccess {
+		errorMsg := ""
+		if len(bodyParts) > 1 {
+			errorMsg = bodyParts[1]
 		}
+		return &Error{Code: errorCode, Message: errorMsg}
+	}
+
+	// 流式解析 JSON 数据
+	if err := streamJsonRecords(bodyParts[6], callback); err != nil {
+		return err
 	}
 
 	return nil
@@ -259,25 +255,23 @@ func (c *Client) QueryForecastReport(ctx context.Context, req *ReportDataRequest
 		return err
 	}
 
-	result := &struct {
-		ErrorCode string   `json:"-"`
-		ErrorMsg  string   `json:"-"`
-		Data      [][]string `json:"record"`
-	}{}
-
-	if err := parseStandardResponse(resp, result); err != nil {
-		return err
+	bodyParts := strings.Split(resp.Body, MessageSplit)
+	if len(bodyParts) < 7 {
+		return errors.New("无效的响应")
 	}
 
-	if result.ErrorCode != ErrSuccess {
-		return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
-	}
-
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
+	errorCode := bodyParts[0]
+	if errorCode != ErrSuccess {
+		errorMsg := ""
+		if len(bodyParts) > 1 {
+			errorMsg = bodyParts[1]
 		}
+		return &Error{Code: errorCode, Message: errorMsg}
+	}
+
+	// 流式解析 JSON 数据
+	if err := streamJsonRecords(bodyParts[6], callback); err != nil {
+		return err
 	}
 
 	return nil
@@ -320,25 +314,23 @@ func (c *Client) queryStockClassification(ctx context.Context, msgType, code, da
 		return err
 	}
 
-	result := &struct {
-		ErrorCode string   `json:"-"`
-		ErrorMsg  string   `json:"-"`
-		Data      [][]string `json:"record"`
-	}{}
-
-	if err := parseStandardResponse(resp, result); err != nil {
-		return err
+	bodyParts := strings.Split(resp.Body, MessageSplit)
+	if len(bodyParts) < 7 {
+		return errors.New("无效的响应")
 	}
 
-	if result.ErrorCode != ErrSuccess {
-		return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
-	}
-
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
+	errorCode := bodyParts[0]
+	if errorCode != ErrSuccess {
+		errorMsg := ""
+		if len(bodyParts) > 1 {
+			errorMsg = bodyParts[1]
 		}
+		return &Error{Code: errorCode, Message: errorMsg}
+	}
+
+	// 流式解析 JSON 数据
+	if err := streamJsonRecords(bodyParts[6], callback); err != nil {
+		return err
 	}
 
 	return nil
@@ -489,25 +481,23 @@ func (c *Client) QueryRequiredReserveRatioData(ctx context.Context, startDate, e
 		return err
 	}
 
-	result := &struct {
-		ErrorCode string   `json:"-"`
-		ErrorMsg  string   `json:"-"`
-		Data      [][]string `json:"record"`
-	}{}
-
-	if err := parseStandardResponse(resp, result); err != nil {
-		return err
+	bodyParts := strings.Split(resp.Body, MessageSplit)
+	if len(bodyParts) < 7 {
+		return errors.New("无效的响应")
 	}
 
-	if result.ErrorCode != ErrSuccess {
-		return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
-	}
-
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
+	errorCode := bodyParts[0]
+	if errorCode != ErrSuccess {
+		errorMsg := ""
+		if len(bodyParts) > 1 {
+			errorMsg = bodyParts[1]
 		}
+		return &Error{Code: errorCode, Message: errorMsg}
+	}
+
+	// 流式解析 JSON 数据
+	if err := streamJsonRecords(bodyParts[6], callback); err != nil {
+		return err
 	}
 
 	return nil
@@ -531,25 +521,23 @@ func (c *Client) QueryMoneySupplyDataMonth(ctx context.Context, startDate, endDa
 		return err
 	}
 
-	result := &struct {
-		ErrorCode string   `json:"-"`
-		ErrorMsg  string   `json:"-"`
-		Data      [][]string `json:"record"`
-	}{}
-
-	if err := parseStandardResponse(resp, result); err != nil {
-		return err
+	bodyParts := strings.Split(resp.Body, MessageSplit)
+	if len(bodyParts) < 7 {
+		return errors.New("无效的响应")
 	}
 
-	if result.ErrorCode != ErrSuccess {
-		return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
-	}
-
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
+	errorCode := bodyParts[0]
+	if errorCode != ErrSuccess {
+		errorMsg := ""
+		if len(bodyParts) > 1 {
+			errorMsg = bodyParts[1]
 		}
+		return &Error{Code: errorCode, Message: errorMsg}
+	}
+
+	// 流式解析 JSON 数据
+	if err := streamJsonRecords(bodyParts[6], callback); err != nil {
+		return err
 	}
 
 	return nil
@@ -573,25 +561,23 @@ func (c *Client) QueryMoneySupplyDataYear(ctx context.Context, startDate, endDat
 		return err
 	}
 
-	result := &struct {
-		ErrorCode string   `json:"-"`
-		ErrorMsg  string   `json:"-"`
-		Data      [][]string `json:"record"`
-	}{}
-
-	if err := parseStandardResponse(resp, result); err != nil {
-		return err
+	bodyParts := strings.Split(resp.Body, MessageSplit)
+	if len(bodyParts) < 7 {
+		return errors.New("无效的响应")
 	}
 
-	if result.ErrorCode != ErrSuccess {
-		return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
-	}
-
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
+	errorCode := bodyParts[0]
+	if errorCode != ErrSuccess {
+		errorMsg := ""
+		if len(bodyParts) > 1 {
+			errorMsg = bodyParts[1]
 		}
+		return &Error{Code: errorCode, Message: errorMsg}
+	}
+
+	// 流式解析 JSON 数据
+	if err := streamJsonRecords(bodyParts[6], callback); err != nil {
+		return err
 	}
 
 	return nil

@@ -3,6 +3,7 @@ package baostock
 import (
 	"bytes"
 	"compress/zlib"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/crc32"
@@ -30,6 +31,53 @@ func decompressData(compressed []byte) ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+// streamJsonRecords 流式解析 JSON 记录数组
+//jsonData 格式: {"record":[["field1","field2",...],["field1","field2",...],...]}
+// callback 对每条记录调用，返回 error 可停止迭代
+func streamJsonRecords(jsonData string, callback func(record []string) error) error {
+	dec := json.NewDecoder(bytes.NewReader([]byte(jsonData)))
+
+	// 读取开始对象 {
+	if _, err := dec.Token(); err != nil {
+		return fmt.Errorf("JSON格式错误: %w", err)
+	}
+
+	// 读取 "record" 字段名
+	if _, err := dec.Token(); err != nil {
+		return fmt.Errorf("JSON格式错误: %w", err)
+	}
+
+	// 读取数组开始 [
+	if _, err := dec.Token(); err != nil {
+		return fmt.Errorf("JSON格式错误: %w", err)
+	}
+
+	// 逐条读取记录
+	for dec.More() {
+		var record []string
+		if err := dec.Decode(&record); err != nil {
+			return fmt.Errorf("解析记录失败: %w", err)
+		}
+		if err := callback(record); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// parseJsonRecords 一次性解析 JSON 记录数组（保留用于兼容）
+//jsonData 格式: {"record":[["field1","field2",...],["field1","field2",...],...]}
+func parseJsonRecords(jsonData string) ([][]string, error) {
+	var parsedData struct {
+		Record [][]string `json:"record"`
+	}
+	if err := json.Unmarshal([]byte(jsonData), &parsedData); err != nil {
+		return nil, err
+	}
+	return parsedData.Record, nil
 }
 
 // detectMarketByCode 根据股票代码判断市场
@@ -214,3 +262,76 @@ func BuildMessageHeader(msgType string, bodyLength int) string {
 var (
 	ErrInvalidHeader = errors.New("无效的消息头")
 )
+
+// recordIterator JSON 记录迭代器，用于迭代器风格的 API
+type recordIterator struct {
+	jsonData string
+	dec      *json.Decoder
+	record   []string
+	err      error
+	done     bool
+}
+
+// newRecordIterator 创建新的记录迭代器
+func newRecordIterator(jsonData string) *recordIterator {
+	return &recordIterator{
+		jsonData: jsonData,
+		dec:      json.NewDecoder(bytes.NewReader([]byte(jsonData))),
+	}
+}
+
+// Next 移动到下一条记录，返回是否还有更多记录
+func (it *recordIterator) Next() bool {
+	if it.done {
+		return false
+	}
+
+	// 第一次调用时，需要跳过开头的 {"record":
+	if it.record == nil {
+		// 读取开始对象 {
+		if _, err := it.dec.Token(); err != nil {
+			it.err = err
+			it.done = true
+			return false
+		}
+		// 读取 "record" 字段名
+		if _, err := it.dec.Token(); err != nil {
+			it.err = err
+			it.done = true
+			return false
+		}
+		// 读取数组开始 [
+		if _, err := it.dec.Token(); err != nil {
+			it.err = err
+			it.done = true
+			return false
+		}
+	}
+
+	// 检查是否还有更多元素
+	if !it.dec.More() {
+		it.done = true
+		return false
+	}
+
+	// 解码下一条记录
+	var record []string
+	if err := it.dec.Decode(&record); err != nil {
+		it.err = err
+		it.done = true
+		return false
+	}
+
+	it.record = record
+	return true
+}
+
+// Record 返回当前记录
+func (it *recordIterator) Record() []string {
+	return it.record
+}
+
+// Err 返回迭代过程中遇到的错误
+func (it *recordIterator) Err() error {
+	return it.err
+}

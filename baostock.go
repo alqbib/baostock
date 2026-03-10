@@ -776,19 +776,9 @@ func (c *Client) QueryTradeDates(ctx context.Context, startDate, endDate string,
 		return &Error{Code: errorCode, Message: errorMsg}
 	}
 
-	// 解析JSON数据
-	var result struct {
-		Data [][]string `json:"record"`
-	}
-	if err := json.Unmarshal([]byte(bodyParts[6]), &result); err != nil {
-		return fmt.Errorf("解析数据JSON失败: %w", err)
-	}
-
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
-		}
+	// 流式解析 JSON 数据（避免一次性加载 10000 条记录到内存）
+	if err := streamJsonRecords(bodyParts[6], callback); err != nil {
+		return err
 	}
 
 	return nil
@@ -830,19 +820,9 @@ func (c *Client) QueryAllStock(ctx context.Context, date string, callback func(r
 		return &Error{Code: errorCode, Message: errorMsg}
 	}
 
-	// 解析JSON数据
-	var result struct {
-		Data [][]string `json:"record"`
-	}
-	if err := json.Unmarshal([]byte(bodyParts[6]), &result); err != nil {
-		return fmt.Errorf("解析数据JSON失败: %w", err)
-	}
-
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
-		}
+	// 流式解析 JSON 数据
+	if err := streamJsonRecords(bodyParts[6], callback); err != nil {
+		return err
 	}
 
 	return nil
@@ -889,19 +869,9 @@ func (c *Client) QueryStockBasic(ctx context.Context, code, codeName string, cal
 		return &Error{Code: errorCode, Message: errorMsg}
 	}
 
-	// 解析JSON数据
-	var result struct {
-		Data [][]string `json:"record"`
-	}
-	if err := json.Unmarshal([]byte(bodyParts[6]), &result); err != nil {
-		return fmt.Errorf("解析数据JSON失败: %w", err)
-	}
-
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
-		}
+	// 流式解析 JSON 数据
+	if err := streamJsonRecords(bodyParts[6], callback); err != nil {
+		return err
 	}
 
 	return nil
@@ -934,25 +904,23 @@ func (c *Client) QueryStockIndustry(ctx context.Context, code, date string, call
 		return err
 	}
 
-	result := &struct {
-		ErrorCode string     `json:"-"`
-		ErrorMsg  string     `json:"-"`
-		Data      [][]string `json:"record"`
-	}{}
-
-	if err := parseStandardResponse(resp, result); err != nil {
-		return err
+	bodyParts := strings.Split(resp.Body, MessageSplit)
+	if len(bodyParts) < 7 {
+		return errors.New("无效的响应")
 	}
 
-	if result.ErrorCode != ErrSuccess {
-		return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
-	}
-
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
+	errorCode := bodyParts[0]
+	if errorCode != ErrSuccess {
+		errorMsg := ""
+		if len(bodyParts) > 1 {
+			errorMsg = bodyParts[1]
 		}
+		return &Error{Code: errorCode, Message: errorMsg}
+	}
+
+	// 流式解析 JSON 数据
+	if err := streamJsonRecords(bodyParts[6], callback); err != nil {
+		return err
 	}
 
 	return nil
@@ -1015,19 +983,9 @@ func (c *Client) queryIndexStocks(ctx context.Context, msgType, date string, cal
 		return &Error{Code: errorCode, Message: errorMsg}
 	}
 
-	// 解析JSON数据
-	var result struct {
-		Data [][]string `json:"record"`
-	}
-	if err := json.Unmarshal([]byte(bodyParts[6]), &result); err != nil {
-		return fmt.Errorf("解析数据JSON失败: %w", err)
-	}
-
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
-		}
+	// 流式解析 JSON 数据
+	if err := streamJsonRecords(bodyParts[6], callback); err != nil {
+		return err
 	}
 
 	return nil
@@ -1093,9 +1051,9 @@ func (c *Client) queryEconomicData(ctx context.Context, msgType, startDate, endD
 	}
 
 	result := &struct {
-		ErrorCode string     `json:"-"`
-		ErrorMsg  string     `json:"-"`
-		Data      [][]string `json:"record"`
+		ErrorCode string `json:"-"`
+		ErrorMsg  string `json:"-"`
+		jsonData   string `json:"-"`
 	}{}
 
 	if err := parseStandardResponse(resp, result); err != nil {
@@ -1106,11 +1064,9 @@ func (c *Client) queryEconomicData(ctx context.Context, msgType, startDate, endD
 		return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
 	}
 
-	// 流式处理
-	for _, record := range result.Data {
-		if err := callback(record); err != nil {
-			return err
-		}
+	// 流式解析 JSON 数据
+	if err := streamJsonRecords(result.jsonData, callback); err != nil {
+		return err
 	}
 
 	return nil
@@ -1214,6 +1170,10 @@ func parseStandardResponse(resp *Response, result interface{}) error {
 
 	// 从bodyParts[6]解析JSON数据
 	if len(bodyParts) > 6 && bodyParts[6] != "" {
+		// 检查是否有 jsonData 字段用于流式解析
+		if r, ok := result.(interface{ setJsonData(string) }); ok {
+			r.setJsonData(bodyParts[6])
+		}
 		if err := json.Unmarshal([]byte(bodyParts[6]), result); err != nil {
 			return fmt.Errorf("解析数据JSON失败: %w", err)
 		}
