@@ -9,15 +9,49 @@
 //	}
 //	defer client.Logout()
 //
+//	// 查询日线K线数据（使用预定义字段集合）
 //	data, err := client.QueryHistoryKDataPlus(context.Background(),
 //	    &baostock.HistoryKDataRequest{
 //	        Code:        "sh.600000",
-//	        Fields:      "date,code,open,high,low,close,volume",
+//	        Fields:      strings.Join(baostock.DailyKLineCommonFields, ","),
 //	        StartDate:   "2023-01-01",
 //	        EndDate:     "2023-12-31",
 //	        Frequency:   baostock.FrequencyDaily,
 //	        AdjustFlag:  baostock.AdjustFlagNoAdjust,
 //	    })
+//
+//	// 或自定义字段
+//	data, err := client.QueryHistoryKDataPlus(context.Background(),
+//	    &baostock.HistoryKDataRequest{
+//	        Code:        "sh.600000",
+//	        Fields:      "date,code,open,high,low,close,volume,amount,pctChg",
+//	        StartDate:   "2023-01-01",
+//	        EndDate:     "2023-12-31",
+//	        Frequency:   baostock.FrequencyDaily,
+//	        AdjustFlag:  baostock.AdjustFlagForward, // 前复权
+//	    })
+//
+// 支持的K线频率：
+//   - FrequencyDaily:   日线（支持1990-12-19至今，18个字段）
+//   - FrequencyWeek:    周线（11个字段）
+//   - FrequencyMonth:   月线（11个字段）
+//   - Frequency5Min:    5分钟线（10个字段，指数无数据）
+//   - Frequency15Min:   15分钟线（10个字段，指数无数据）
+//   - Frequency30Min:   30分钟线（10个字段，指数无数据）
+//   - Frequency60Min:   60分钟线（10个字段，指数无数据）
+//
+// 支持的复权类型：
+//   - AdjustFlagForward:  前复权（推荐用于技术分析）
+//   - AdjustFlagBackward: 后复权
+//   - AdjustFlagNoAdjust: 不复权
+//
+// 可用字段常量定义在 fields.go 中：
+//   - DailyKLineFields:         全部日线字段（18个）
+//   - DailyKLineCommonFields:   日线常用字段（8个）
+//   - WeeklyMonthlyKLineFields: 周月线字段（11个）
+//   - MinuteKLineFields:        分钟线字段（10个）
+//
+// API文档: https://www.baostock.com/mainContent?file=stockKData.md
 package baostock
 
 import (
@@ -44,8 +78,8 @@ const (
 	Delimiter    = "\n"   // ASCII 0x0A
 
 	// 消息结构
-	MessageHeaderLength      = 21
-	MessageHeaderBodyLength  = 10
+	MessageHeaderLength     = 21
+	MessageHeaderBodyLength = 10
 
 	// 分页
 	DefaultPerPageCount = 10000
@@ -60,11 +94,11 @@ const (
 // 消息类型代码
 const (
 	// 登录/登出
-	MsgTypeLoginRequest  = "00"
-	MsgTypeLoginResponse = "01"
-	MsgTypeLogoutRequest = "02"
+	MsgTypeLoginRequest   = "00"
+	MsgTypeLoginResponse  = "01"
+	MsgTypeLogoutRequest  = "02"
 	MsgTypeLogoutResponse = "03"
-	MsgTypeError         = "04"
+	MsgTypeError          = "04"
 
 	// K线数据
 	MsgTypeGetKDataRequest      = "11"
@@ -73,22 +107,22 @@ const (
 	MsgTypeGetKDataPlusResponse = "96"
 
 	// 财务数据
-	MsgTypeQueryDividendDataRequest    = "13"
-	MsgTypeQueryDividendDataResponse   = "14"
-	MsgTypeAdjustFactorRequest         = "15"
-	MsgTypeAdjustFactorResponse        = "16"
-	MsgTypeProfitDataRequest           = "17"
-	MsgTypeProfitDataResponse          = "18"
-	MsgTypeOperationDataRequest        = "19"
-	MsgTypeOperationDataResponse       = "20"
-	MsgTypeQueryGrowthDataRequest      = "21"
-	MsgTypeQueryGrowthDataResponse     = "22"
-	MsgTypeQueryDupontDataRequest      = "23"
-	MsgTypeQueryDupontDataResponse     = "24"
-	MsgTypeQueryBalanceDataRequest     = "25"
-	MsgTypeQueryBalanceDataResponse    = "26"
-	MsgTypeQueryCashFlowDataRequest    = "27"
-	MsgTypeQueryCashFlowDataResponse   = "28"
+	MsgTypeQueryDividendDataRequest  = "13"
+	MsgTypeQueryDividendDataResponse = "14"
+	MsgTypeAdjustFactorRequest       = "15"
+	MsgTypeAdjustFactorResponse      = "16"
+	MsgTypeProfitDataRequest         = "17"
+	MsgTypeProfitDataResponse        = "18"
+	MsgTypeOperationDataRequest      = "19"
+	MsgTypeOperationDataResponse     = "20"
+	MsgTypeQueryGrowthDataRequest    = "21"
+	MsgTypeQueryGrowthDataResponse   = "22"
+	MsgTypeQueryDupontDataRequest    = "23"
+	MsgTypeQueryDupontDataResponse   = "24"
+	MsgTypeQueryBalanceDataRequest   = "25"
+	MsgTypeQueryBalanceDataResponse  = "26"
+	MsgTypeQueryCashFlowDataRequest  = "27"
+	MsgTypeQueryCashFlowDataResponse = "28"
 
 	// 公司公告
 	MsgTypeQueryPerformanceExpressReportRequest  = "29"
@@ -147,24 +181,24 @@ const (
 	MsgTypeQueryStockInRiskResponse = "94"
 
 	// 宏观经济数据
-	MsgTypeQueryDepositRateDataRequest         = "47"
-	MsgTypeQueryDepositRateDataResponse        = "48"
-	MsgTypeQueryLoanRateDataRequest            = "49"
-	MsgTypeQueryLoanRateDataResponse           = "50"
-	MsgTypeQueryRequiredReserveRatioDataRequest = "51"
+	MsgTypeQueryDepositRateDataRequest           = "47"
+	MsgTypeQueryDepositRateDataResponse          = "48"
+	MsgTypeQueryLoanRateDataRequest              = "49"
+	MsgTypeQueryLoanRateDataResponse             = "50"
+	MsgTypeQueryRequiredReserveRatioDataRequest  = "51"
 	MsgTypeQueryRequiredReserveRatioDataResponse = "52"
-	MsgTypeQueryMoneySupplyDataMonthRequest    = "53"
-	MsgTypeQueryMoneySupplyDataMonthResponse   = "54"
-	MsgTypeQueryMoneySupplyDataYearRequest     = "55"
-	MsgTypeQueryMoneySupplyDataYearResponse    = "56"
-	MsgTypeQuerySHIBORDataRequest              = "57"
-	MsgTypeQuerySHIBORDataResponse             = "58"
-	MsgTypeQueryCPIDataRequest                 = "75"
-	MsgTypeQueryCPIDataResponse                = "76"
-	MsgTypeQueryPPIDataRequest                 = "77"
-	MsgTypeQueryPPIDataResponse                = "78"
-	MsgTypeQueryPMIDataRequest                 = "79"
-	MsgTypeQueryPMIDataResponse                = "80"
+	MsgTypeQueryMoneySupplyDataMonthRequest      = "53"
+	MsgTypeQueryMoneySupplyDataMonthResponse     = "54"
+	MsgTypeQueryMoneySupplyDataYearRequest       = "55"
+	MsgTypeQueryMoneySupplyDataYearResponse      = "56"
+	MsgTypeQuerySHIBORDataRequest                = "57"
+	MsgTypeQuerySHIBORDataResponse               = "58"
+	MsgTypeQueryCPIDataRequest                   = "75"
+	MsgTypeQueryCPIDataResponse                  = "76"
+	MsgTypeQueryPPIDataRequest                   = "77"
+	MsgTypeQueryPPIDataResponse                  = "78"
+	MsgTypeQueryPMIDataRequest                   = "79"
+	MsgTypeQueryPMIDataResponse                  = "80"
 
 	// 实时行情
 	MsgTypeLoginRealTimeRequest    = "37"
@@ -177,116 +211,44 @@ const (
 	MsgTypeCancelSubscribeResponse = "44"
 )
 
-// 错误代码
-const (
-	ErrSuccess                = "0"
-	ErrNoLogin               = "10001001"
-	ErrUsernameOrPassword    = "10001002"
-	ErrGetUserInfoFail       = "10001003"
-	ErrClientVersionExpire   = "10001004"
-	ErrLoginCountLimit       = "10001005"
-	ErrAccessInsufficience   = "10001006"
-	ErrNeedActivate          = "10001007"
-	ErrUsernameEmpty         = "10001008"
-	ErrPasswordEmpty         = "10001009"
-	ErrLogoutFail            = "10001010"
-	ErrBlacklistUser         = "10001011"
-	ErrSocketErr             = "10002001"
-	ErrConnectFail           = "10002002"
-	ErrConnectTimeout        = "10002003"
-	ErrRecvConnectionClosed  = "10002004"
-	ErrSendSockFail          = "10002005"
-	ErrSendSockTimeout       = "10002006"
-	ErrRecvSockFail          = "10002007"
-	ErrRecvSockTimeout       = "10002008"
-	ErrParseDataErr          = "10004001"
-	ErrUngzipDataFail        = "10004002"
-	ErrUnknownErr            = "10004003"
-	ErrOutOfBounds           = "10004004"
-	ErrInparamEmpty          = "10004005"
-	ErrParamErr              = "10004006"
-	ErrStartDateErr          = "10004007"
-	ErrEndDateErr            = "10004008"
-	ErrStartBigthanEnd       = "10004009"
-	ErrDateErr               = "10004010"
-	ErrCodeInvalided         = "10004011"
-	ErrIndicatorInvalided    = "10004012"
-	ErrBeyondDateSupport     = "10004013"
-	ErrMixedCodesMarket      = "10004014"
-	ErrNoSupportCodesMarket  = "10004015"
-	ErrOrderToUpperLimit     = "10004016"
-	ErrNoSupportOrderInfo    = "10004017"
-	ErrIndicatorRepeat       = "10004018"
-	ErrMessageError          = "10004019"
-	ErrMessageCodeError      = "10004020"
-	ErrSystemError           = "10005001"
-)
-
-// 错误信息映射
-var errorMessages = map[string]string{
-	ErrSuccess:                "成功",
-	ErrNoLogin:               "用户未登录",
-	ErrUsernameOrPassword:    "用户名或密码错误",
-	ErrGetUserInfoFail:       "获取用户信息失败",
-	ErrClientVersionExpire:   "客户端版本号过期",
-	ErrLoginCountLimit:       "账号登录数达到上限",
-	ErrAccessInsufficience:   "用户权限不足",
-	ErrNeedActivate:          "需要登录激活",
-	ErrUsernameEmpty:         "用户名为空",
-	ErrPasswordEmpty:         "密码为空",
-	ErrLogoutFail:            "用户登出失败",
-	ErrBlacklistUser:         "黑名单用户",
-	ErrSocketErr:             "网络错误",
-	ErrConnectFail:           "网络连接失败",
-	ErrConnectTimeout:        "网络连接超时",
-	ErrRecvConnectionClosed:  "网络接收时连接断开",
-	ErrSendSockFail:          "网络发送失败",
-	ErrSendSockTimeout:       "网络发送超时",
-	ErrRecvSockFail:          "网络接收错误",
-	ErrRecvSockTimeout:       "网络接收超时",
-	ErrParseDataErr:          "解析数据错误",
-	ErrUngzipDataFail:        "gzip解压失败",
-	ErrUnknownErr:            "客户端未知错误",
-	ErrOutOfBounds:           "数组越界",
-	ErrInparamEmpty:          "传入参数为空",
-	ErrParamErr:              "参数错误",
-	ErrStartDateErr:          "起始日期格式不正确",
-	ErrEndDateErr:            "截止日期格式不正确",
-	ErrStartBigthanEnd:       "起始日期大于终止日期",
-	ErrDateErr:               "日期格式不正确",
-	ErrCodeInvalided:         "无效的证券代码",
-	ErrIndicatorInvalided:    "无效的指标",
-	ErrBeyondDateSupport:     "超出日期支持范围",
-	ErrMixedCodesMarket:      "不支持的混合证券品种",
-	ErrNoSupportCodesMarket:  "不支持的证券代码品种",
-	ErrOrderToUpperLimit:     "交易条数超过上限",
-	ErrNoSupportOrderInfo:    "不支持的交易信息",
-	ErrIndicatorRepeat:       "指标重复",
-	ErrMessageError:          "消息格式不正确",
-	ErrMessageCodeError:      "错误的消息类型",
-	ErrSystemError:           "系统级别错误",
-}
-
-// Frequency 表示K线频率
+// Frequency 表示K线数据频率
+//
+// 可获取的数据范围：
+//   - 日线: 1990-12-19 至当前时间
+//   - 周线: 每周最后一个交易日可获取
+//   - 月线: 每月最后一个交易日可获取
+//   - 分钟线: 支持5/15/30/60分钟，指数无分钟线数据
+//
+// 不同频率支持的字段：
+//   - 日线: 全部18个字段（包含 peTTM, psTTM, pbMRQ 等估值指标）
+//   - 周月线: 11个字段（不包含 preclose, tradestatus, 估值指标）
+//   - 分钟线: 10个字段（增加 time 字段，不包含估值指标）
 type Frequency string
 
 const (
-	Frequency5Min  Frequency = "5"  // 5分钟
-	Frequency15Min Frequency = "15" // 15分钟
-	Frequency30Min Frequency = "30" // 30分钟
-	Frequency60Min Frequency = "60" // 60分钟
-	FrequencyDaily Frequency = "d"  // 日线
-	FrequencyWeek  Frequency = "w"  // 周线
-	FrequencyMonth Frequency = "m"  // 月线
+	Frequency5Min  Frequency = "5"  // 5分钟K线（指数无数据）
+	Frequency15Min Frequency = "15" // 15分钟K线（指数无数据）
+	Frequency30Min Frequency = "30" // 30分钟K线（指数无数据）
+	Frequency60Min Frequency = "60" // 60分钟K线（指数无数据）
+	FrequencyDaily Frequency = "d"  // 日K线，支持1990-12-19至今
+	FrequencyWeek  Frequency = "w"  // 周K线，每周最后一个交易日可获取
+	FrequencyMonth Frequency = "m"  // 月K线，每月最后一个交易日可获取
 )
 
 // AdjustFlag 表示复权类型
+//
+// BaoStock 使用"涨跌幅复权法"进行复权：
+//   - 后复权(1): 以当前为基准，历史价格向前调整
+//   - 前复权(2): 以当前为基准，未来价格向后调整（推荐用于技术分析）
+//   - 不复权(3): 原始价格，不进行复权处理
+//
+// 注意：不同系统间采用复权方式可能不一致，导致数据与同花顺、通达信等存在差异
 type AdjustFlag string
 
 const (
-	AdjustFlagBackward  AdjustFlag = "1" // 后复权
-	AdjustFlagForward   AdjustFlag = "2" // 前复权
-	AdjustFlagNoAdjust  AdjustFlag = "3" // 不复权
+	AdjustFlagBackward AdjustFlag = "1" // 后复权：以当前为基准，历史价格向前调整
+	AdjustFlagForward  AdjustFlag = "2" // 前复权：以当前为基准，未来价格向后调整（推荐）
+	AdjustFlagNoAdjust AdjustFlag = "3" // 不复权：使用原始价格
 )
 
 // Config 表示客户端配置
@@ -435,8 +397,8 @@ func (c *Client) sendMessage(ctx context.Context, msgType, msgBody string) (*Res
 		return nil, fmt.Errorf("发送消息失败: %w", err)
 	}
 
-	// 接收响应
-	response, err := c.receiveResponse()
+	// 接收响应（支持 context 取消）
+	response, err := c.receiveResponse(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -445,10 +407,17 @@ func (c *Client) sendMessage(ctx context.Context, msgType, msgBody string) (*Res
 }
 
 // receiveResponse 接收并解析来自服务器的响应
-func (c *Client) receiveResponse() (*Response, error) {
+func (c *Client) receiveResponse(ctx context.Context) (*Response, error) {
 	var buffer bytes.Buffer
 
 	for {
+		// 检查 context 是否已取消
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		line, err := c.reader.ReadString('\n')
 		if err != nil {
 			return nil, fmt.Errorf("读取响应失败: %w", err)
@@ -566,36 +535,101 @@ type LoginResponse struct {
 }
 
 // HistoryKDataRequest 表示历史K线数据请求
+//
+// 可用字段列表：
+//
+// 日线字段（包含停牌证券，18个）：
+//   date       - 交易所行情日期，格式：YYYY-MM-DD
+//   code       - 证券代码，格式：sh.600000 或 sz.000001
+//   open       - 开盘价，精度：小数点后4位，单位：人民币元
+//   high       - 最高价，精度：小数点后4位，单位：人民币元
+//   low        - 最低价，精度：小数点后4位，单位：人民币元
+//   close      - 收盘价，精度：小数点后4位，单位：人民币元
+//   preclose   - 昨日收盘价，精度：小数点后4位，单位：人民币元
+//   volume     - 成交数量，单位：股
+//   amount     - 成交金额，精度：小数点后4位，单位：人民币元
+//   adjustflag - 复权状态：1=后复权，2=前复权，3=不复权
+//   turn       - 换手率，精度：小数点后6位，单位：%
+//   tradestatus- 交易状态：1=正常交易，0=停牌
+//   pctChg     - 涨跌幅（百分比），精度：小数点后6位
+//   peTTM      - 滚动市盈率，精度：小数点后6位
+//   psTTM      - 滚动市销率，精度：小数点后6位
+//   pcfNcfTTM  - 滚动市现率，精度：小数点后6位
+//   pbMRQ      - 市净率，精度：小数点后6位
+//   isST       - 是否ST股：1=是，0=否
+//
+// 周月线字段（11个）：
+//   date, code, open, high, low, close, volume, amount,
+//   adjustflag, turn, pctChg
+//
+// 分钟线字段（5/15/30/60分钟，10个）：
+//   date       - 交易所行情日期，格式：YYYY-MM-DD
+//   time       - 交易所行情时间，格式：YYYYMMDDHHMMSSsss
+//   code       - 证券代码
+//   open, high, low, close, volume, amount, adjustflag
+//
+// 注意：
+//   - 指数没有分钟线数据
+//   - 周线每周最后一个交易日才可以获取
+//   - 月线每月最后一个交易日才可以获取
+//   - 分钟线数据不包含指数
+//
+// 示例：
+//   // 日线查询（使用预定义字段集合）
+//   req.Fields = strings.Join(baostock.DailyKLineFields, ",")
+//   或自定义字段:
+//   req.Fields = "date,code,open,high,low,close,volume,amount"
 type HistoryKDataRequest struct {
-	Code       string   // 证券代码
-	Fields     string   // 字段列表
-	StartDate  string   // 开始日期
-	EndDate    string   // 结束日期
-	Frequency  Frequency // K线频率
-	AdjustFlag AdjustFlag // 复权标志
+	Code       string     // 证券代码，如 "sh.600000" 或 "sz.000001"
+	Fields     string     // 字段列表，用逗号分隔，如 "date,code,open,high,low,close"
+	StartDate  string     // 开始日期（包含），格式 "YYYY-MM-DD"，为空时取 2015-01-01
+	EndDate    string     // 结束日期（包含），格式 "YYYY-MM-DD"，为空时取最近交易日
+	Frequency  Frequency  // K线频率：d=日线，w=周线，m=月线，5/15/30/60=分钟线
+	AdjustFlag AdjustFlag // 复权标志：1=后复权，2=前复权，3=不复权（默认）
 }
 
 // HistoryKDataResponse 表示历史K线数据响应
 type HistoryKDataResponse struct {
-	ErrorCode     string   // 错误代码
-	ErrorMsg      string   // 错误信息
-	Method        string   // 方法名
-	UserID        string   // 用户ID
-	CurPageNum    string   // 当前页码
-	PerPageCount  string   // 每页条数
-	Data          [][]string // 数据
-	Code          string   // 证券代码
-	Fields        []string // 字段列表
-	StartDate     string   // 开始日期
-	EndDate       string   // 结束日期
-	Frequency     string   // K线频率
-	AdjustFlag    string   // 复权标志
+	ErrorCode    string     // 错误代码
+	ErrorMsg     string     // 错误信息
+	Method       string     // 方法名
+	UserID       string     // 用户ID
+	CurPageNum   string     // 当前页码
+	PerPageCount string     // 每页条数
+	Data         [][]string // 数据
+	Code         string     // 证券代码
+	Fields       []string   // 字段列表
+	StartDate    string     // 开始日期
+	EndDate      string     // 结束日期
+	Frequency    string     // K线频率
+	AdjustFlag   string     // 复权标志
 }
 
 // QueryHistoryKDataPlus 查询历史K线数据
+//
+// 通过API接口获取A股历史交易数据，支持日K线、周K线、月K线以及5/15/30/60分钟K线数据。
+// 可获取1990-12-19至当前时间的数据，支持前复权、后复权、不复权三种类型。
+//
+// Fields 参数说明（不同频率支持的字段不同）：
+//
+// 日线字段（18个）:
+//   date,code,open,high,low,close,preclose,volume,amount,adjustflag,
+//   turn,tradestatus,pctChg,peTTM,psTTM,pcfNcfTTM,pbMRQ,isST
+//
+// 周月线字段（11个）:
+//   date,code,open,high,low,close,volume,amount,adjustflag,turn,pctChg
+//
+// 分钟线字段（10个）:
+//   date,time,code,open,high,low,close,volume,amount,adjustflag
+//
+// 使用预定义字段集合示例:
+//   req.Fields = strings.Join(baostock.DailyKLineCommonFields, ",")
+//
+// 或自定义字段（逗号分隔）:
+//   req.Fields = "date,code,open,high,low,close,volume,amount"
 func (c *Client) QueryHistoryKDataPlus(ctx context.Context, req *HistoryKDataRequest) (*HistoryKDataResponse, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if err := validateStockCode(req.Code); err != nil {
@@ -632,8 +666,8 @@ func (c *Client) QueryHistoryKDataPlus(ctx context.Context, req *HistoryKDataReq
 
 // QueryTradeDates 查询交易日
 func (c *Client) QueryTradeDates(ctx context.Context, startDate, endDate string) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if startDate == "" {
@@ -679,8 +713,8 @@ func (c *Client) QueryTradeDates(ctx context.Context, startDate, endDate string)
 
 // QueryAllStock 查询指定日期的所有股票
 func (c *Client) QueryAllStock(ctx context.Context, date string) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if date == "" {
@@ -723,8 +757,8 @@ func (c *Client) QueryAllStock(ctx context.Context, date string) ([][]string, er
 
 // QueryStockBasic 查询股票基本信息
 func (c *Client) QueryStockBasic(ctx context.Context, code, codeName string) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if code != "" {
@@ -772,8 +806,8 @@ func (c *Client) QueryStockBasic(ctx context.Context, code, codeName string) ([]
 
 // QueryStockIndustry 查询行业分类
 func (c *Client) QueryStockIndustry(ctx context.Context, code, date string) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if code != "" {
@@ -795,8 +829,8 @@ func (c *Client) QueryStockIndustry(ctx context.Context, code, date string) ([][
 	}
 
 	result := &struct {
-		ErrorCode string   `json:"-"`
-		ErrorMsg  string   `json:"-"`
+		ErrorCode string     `json:"-"`
+		ErrorMsg  string     `json:"-"`
 		Data      [][]string `json:"record"`
 	}{}
 
@@ -828,8 +862,8 @@ func (c *Client) QueryZZ500Stocks(ctx context.Context, date string) ([][]string,
 
 // queryIndexStocks 指数成分股查询辅助方法
 func (c *Client) queryIndexStocks(ctx context.Context, msgType, date string) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if date == "" {
@@ -897,8 +931,8 @@ func (c *Client) QueryPMIData(ctx context.Context, startDate, endDate string) ([
 
 // queryEconomicData 经济数据查询辅助方法
 func (c *Client) queryEconomicData(ctx context.Context, msgType, startDate, endDate, extraParam string) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	msgBody := fmt.Sprintf("economic_data%s%s%s1%s%d%s%s%s%s",
@@ -915,8 +949,8 @@ func (c *Client) queryEconomicData(ctx context.Context, msgType, startDate, endD
 	}
 
 	result := &struct {
-		ErrorCode string   `json:"-"`
-		ErrorMsg  string   `json:"-"`
+		ErrorCode string     `json:"-"`
+		ErrorMsg  string     `json:"-"`
 		Data      [][]string `json:"record"`
 	}{}
 
@@ -929,19 +963,6 @@ func (c *Client) queryEconomicData(ctx context.Context, msgType, startDate, endD
 	}
 
 	return result.Data, nil
-}
-
-// Error 表示 BaoStock 错误
-type Error struct {
-	Code    string
-	Message string
-}
-
-func (e *Error) Error() string {
-	if msg, ok := errorMessages[e.Code]; ok {
-		return fmt.Sprintf("%s: %s", e.Code, msg)
-	}
-	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
 // 辅助函数
@@ -1010,12 +1031,12 @@ func parseHistoryKDataResponse(resp *Response) (*HistoryKDataResponse, error) {
 
 	// 解析JSON数据
 	if len(bodyParts) > 6 {
-		dataJson := bodyParts[6]
-		if dataJson != "" {
+		dataJSON := bodyParts[6]
+		if dataJSON != "" {
 			var parsedData struct {
 				Record [][]string `json:"record"`
 			}
-			if err := json.Unmarshal([]byte(dataJson), &parsedData); err != nil {
+			if err := json.Unmarshal([]byte(dataJSON), &parsedData); err != nil {
 				return nil, fmt.Errorf("解析数据JSON失败: %w", err)
 			}
 			result.Data = parsedData.Record
@@ -1047,5 +1068,13 @@ func parseStandardResponse(resp *Response, result interface{}) error {
 		}
 	}
 
+	return nil
+}
+
+// ensureLogin 检查并确保用户已登录
+func (c *Client) ensureLogin() error {
+	if !c.loggedIn {
+		return &Error{Code: ErrNoLogin, Message: errorMessages[ErrNoLogin]}
+	}
 	return nil
 }

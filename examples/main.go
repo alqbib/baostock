@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/millken/baostock"
 )
@@ -47,7 +48,7 @@ func queryKDataExample(client *baostock.Client) {
 	data, err := client.QueryHistoryKDataPlus(context.Background(),
 		&baostock.HistoryKDataRequest{
 			Code:       "sh.600000", // 浦发银行
-			Fields:     "date,code,open,high,low,close,volume",
+			Fields:     strings.Join(baostock.DailyKLineFields, ","),
 			StartDate:  "2023-12-01",
 			EndDate:    "2023-12-31",
 			Frequency:  baostock.FrequencyDaily,     // 日线
@@ -70,8 +71,8 @@ func queryKDataExample(client *baostock.Client) {
 		if i >= 5 {
 			break
 		}
-		fmt.Printf("  %s: 开盘=%s, 最高=%s, 最低=%s, 收盘=%s, 成交量=%s\n",
-			row[0], row[2], row[3], row[4], row[5], row[6])
+		fmt.Printf("%s  %s: 开盘=%s, 最高=%s, 最低=%s, 收盘=%s, 成交量=%s\n",
+			row[0], row[1], row[2], row[3], row[4], row[5], row[6])
 	}
 }
 

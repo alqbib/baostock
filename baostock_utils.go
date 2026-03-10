@@ -3,7 +3,6 @@ package baostock
 import (
 	"bytes"
 	"compress/zlib"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash/crc32"
@@ -215,15 +214,3 @@ func BuildMessageHeader(msgType string, bodyLength int) string {
 var (
 	ErrInvalidHeader = errors.New("无效的消息头")
 )
-
-// ToLittleEndianUint32 将uint32转换为小端字节序
-func ToLittleEndianUint32(value uint32) []byte {
-	buf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, value)
-	return buf
-}
-
-// FromLittleEndianUint32 将小端字节序转换为uint32
-func FromLittleEndianUint32(buf []byte) uint32 {
-	return binary.LittleEndian.Uint32(buf)
-}

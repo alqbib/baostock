@@ -88,8 +88,16 @@ func NewYearDateRange(year int) *DateRange {
 // NewMonthDateRange 创建指定月份的日期范围
 func NewMonthDateRange(year, month int) *DateRange {
 	start := fmt.Sprintf("%d-%02d-01", year, month)
-	// 计算月末日期
-	t := time.Date(year, time.Month(month+1), 0, 0, 0, 0, 0, time.UTC)
+	// 计算月末日期 - 使用下月第0天来获取本月最后一天
+	nextMonth := month % 12 // 处理12月的情况，12%12=0，time.Date会正确处理
+	nextYear := year
+	if nextMonth == 0 {
+		nextMonth = 12
+	} else {
+		nextYear = year + 1
+	}
+	// 获取下月第一天，然后减去一天得到本月最后一天
+	t := time.Date(nextYear, time.Month(nextMonth), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
 	end := fmt.Sprintf("%d-%02d-%02d", year, month, t.Day())
 	return &DateRange{StartDate: start, EndDate: end}
 }

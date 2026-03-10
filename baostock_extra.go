@@ -40,8 +40,8 @@ func (c *Client) QueryCashFlowData(ctx context.Context, req *QuarterlyDataReques
 
 // queryQuarterlyData 季频数据查询辅助方法
 func (c *Client) queryQuarterlyData(ctx context.Context, msgType string, req *QuarterlyDataRequest, methodName string) (*QuarterlyDataResponse, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if err := validateStockCode(req.Code); err != nil {
@@ -79,8 +79,8 @@ func (c *Client) queryQuarterlyData(ctx context.Context, msgType string, req *Qu
 
 // QueryDividendData 查询股息分红数据
 func (c *Client) QueryDividendData(ctx context.Context, req *DividendDataRequest) (*QuarterlyDataResponse, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if err := validateStockCode(req.Code); err != nil {
@@ -114,8 +114,8 @@ func (c *Client) QueryDividendData(ctx context.Context, req *DividendDataRequest
 
 // QueryAdjustFactor 查询复权因子数据
 func (c *Client) QueryAdjustFactor(ctx context.Context, req *AdjustFactorRequest) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if err := validateStockCode(req.Code); err != nil {
@@ -163,8 +163,8 @@ func (c *Client) QueryAdjustFactor(ctx context.Context, req *AdjustFactorRequest
 
 // QueryPerformanceExpressReport 查询业绩快报
 func (c *Client) QueryPerformanceExpressReport(ctx context.Context, req *ReportDataRequest) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if err := validateStockCode(req.Code); err != nil {
@@ -209,8 +209,8 @@ func (c *Client) QueryPerformanceExpressReport(ctx context.Context, req *ReportD
 
 // QueryForecastReport 查询业绩预告
 func (c *Client) QueryForecastReport(ctx context.Context, req *ReportDataRequest) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if err := validateStockCode(req.Code); err != nil {
@@ -265,8 +265,8 @@ func (c *Client) QueryStockArea(ctx context.Context, code, date string) ([][]str
 
 // queryStockClassification 股票分类查询辅助方法
 func (c *Client) queryStockClassification(ctx context.Context, msgType, code, date, methodName string) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if code != "" {
@@ -348,8 +348,8 @@ func (c *Client) QueryStocksInRisk(ctx context.Context, date string) ([][]string
 
 // querySpecialStocks 特殊股票查询辅助方法
 func (c *Client) querySpecialStocks(ctx context.Context, msgType, methodName, date string) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if date == "" {
@@ -392,8 +392,8 @@ func (c *Client) querySpecialStocks(ctx context.Context, msgType, methodName, da
 
 // QueryRequiredReserveRatioData 查询存款准备金率数据
 func (c *Client) QueryRequiredReserveRatioData(ctx context.Context, startDate, endDate, yearType string) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	if yearType == "" {
@@ -428,8 +428,8 @@ func (c *Client) QueryRequiredReserveRatioData(ctx context.Context, startDate, e
 
 // QueryMoneySupplyDataMonth 查询月度货币供应量数据
 func (c *Client) QueryMoneySupplyDataMonth(ctx context.Context, startDate, endDate string) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	msgBody := fmt.Sprintf("query_money_supply_data_month%s%s%s1%s%d%s%s%s%s",
@@ -460,8 +460,8 @@ func (c *Client) QueryMoneySupplyDataMonth(ctx context.Context, startDate, endDa
 
 // QueryMoneySupplyDataYear 查询年度货币供应量数据
 func (c *Client) QueryMoneySupplyDataYear(ctx context.Context, startDate, endDate string) ([][]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("未登录")
+	if err := c.ensureLogin(); err != nil {
+		return nil, err
 	}
 
 	msgBody := fmt.Sprintf("query_money_supply_data_year%s%s%s1%s%d%s%s%s%s",
@@ -518,12 +518,12 @@ func parseQuarterlyDataResponse(resp *Response) (*QuarterlyDataResponse, error) 
 
 	// 解析JSON数据
 	if len(bodyParts) > 6 {
-		dataJson := bodyParts[6]
-		if dataJson != "" {
+		dataJSON := bodyParts[6]
+		if dataJSON != "" {
 			var parsedData struct {
 				Record [][]string `json:"record"`
 			}
-			if err := json.Unmarshal([]byte(dataJson), &parsedData); err != nil {
+			if err := json.Unmarshal([]byte(dataJSON), &parsedData); err != nil {
 				return nil, fmt.Errorf("解析数据JSON失败: %w", err)
 			}
 			result.Data = parsedData.Record
@@ -558,12 +558,12 @@ func parseDividendDataResponse(resp *Response) (*QuarterlyDataResponse, error) {
 
 	// 解析JSON数据
 	if len(bodyParts) > 6 {
-		dataJson := bodyParts[6]
-		if dataJson != "" {
+		dataJSON := bodyParts[6]
+		if dataJSON != "" {
 			var parsedData struct {
 				Record [][]string `json:"record"`
 			}
-			if err := json.Unmarshal([]byte(dataJson), &parsedData); err != nil {
+			if err := json.Unmarshal([]byte(dataJSON), &parsedData); err != nil {
 				return nil, fmt.Errorf("解析数据JSON失败: %w", err)
 			}
 			result.Data = parsedData.Record

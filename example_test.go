@@ -2,6 +2,7 @@ package baostock
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -373,7 +374,8 @@ func Example_errorHandling() {
 	err := client.Login(context.Background())
 	if err != nil {
 		// 检查是否为BaoStock错误
-		if bsErr, ok := err.(*Error); ok {
+		var bsErr *Error
+		if errors.As(err, &bsErr) {
 			_ = bsErr.Code
 			_ = bsErr.Message
 		}
