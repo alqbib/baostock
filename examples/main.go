@@ -43,93 +43,114 @@ func main() {
 	queryIndexStocksExample(client)
 }
 
-// queryKDataExample 演示K线数据查询
+// queryKDataExample 演示K线数据查询（流式）
 func queryKDataExample(client *baostock.Client) {
-	data, err := client.QueryHistoryKDataPlus(context.Background(),
+	recordCount := 0
+	var fields []string
+
+	err := client.QueryHistoryKDataPlus(context.Background(),
 		&baostock.HistoryKDataRequest{
 			Code:       "sh.600000", // 浦发银行
-			Fields:     strings.Join(baostock.DailyKLineFields, ","),
+			Fields:     strings.Join(baostock.DailyKLineCommonFields, ","),
 			StartDate:  "2023-12-01",
 			EndDate:    "2023-12-31",
 			Frequency:  baostock.FrequencyDaily,     // 日线
 			AdjustFlag: baostock.AdjustFlagNoAdjust, // 不复权
+		},
+		func(f []string, record []string) error {
+			if len(fields) == 0 {
+				fields = f
+				fmt.Printf("字段: %v\n", fields)
+			}
+			recordCount++
+
+			// 只显示前5条
+			if recordCount <= 5 {
+				fmt.Printf("%s  %s: 开盘=%s, 最高=%s, 最低=%s, 收盘=%s, 成交量=%s\n",
+					record[0], record[1], record[2], record[3], record[4], record[5], record[6])
+			}
+			return nil
 		})
+
 	if err != nil {
 		log.Printf("查询失败: %v", err)
 		return
 	}
 
-	if data.ErrorCode != baostock.ErrSuccess {
-		log.Printf("服务器错误: %s", data.ErrorMsg)
-		return
-	}
-
-	fmt.Printf("字段: %v\n", data.Fields)
-	fmt.Printf("总记录数: %d\n", len(data.Data))
-	fmt.Println("\n前5条记录:")
-	for i, row := range data.Data {
-		if i >= 5 {
-			break
-		}
-		fmt.Printf("%s  %s: 开盘=%s, 最高=%s, 最低=%s, 收盘=%s, 成交量=%s\n",
-			row[0], row[1], row[2], row[3], row[4], row[5], row[6])
-	}
+	fmt.Printf("\n总记录数: %d\n", recordCount)
 }
 
-// queryTradeDatesExample 演示交易日查询
+// queryTradeDatesExample 演示交易日查询（流式）
 func queryTradeDatesExample(client *baostock.Client) {
-	data, err := client.QueryTradeDates(context.Background(), "2023-12-01", "2023-12-31")
+	totalDates := 0
+	tradingDays := 0
+
+	err := client.QueryTradeDates(context.Background(), "2023-12-01", "2023-12-31",
+		func(record []string) error {
+			totalDates++
+			if len(record) > 1 && record[1] == "1" {
+				tradingDays++
+			}
+			return nil
+		})
+
 	if err != nil {
 		log.Printf("查询失败: %v", err)
 		return
 	}
 
-	fmt.Printf("总日期数: %d\n", len(data))
-	tradingDays := 0
-	for _, row := range data {
-		if len(row) > 1 && row[1] == "1" {
-			tradingDays++
-		}
-	}
+	fmt.Printf("总日期数: %d\n", totalDates)
 	fmt.Printf("2023年12月交易日天数: %d\n", tradingDays)
 }
 
-// queryAllStocksExample 演示所有股票查询
+// queryAllStocksExample 演示所有股票查询（流式）
 func queryAllStocksExample(client *baostock.Client) {
-	data, err := client.QueryAllStock(context.Background(), "2023-12-29")
+	totalCount := 0
+	count := 0
+
+	err := client.QueryAllStock(context.Background(), "2023-12-29",
+		func(record []string) error {
+			totalCount++
+			if count < 10 && len(record) > 1 {
+				fmt.Printf("  %s: %s\n", record[0], record[1])
+				count++
+			}
+			return nil
+		})
+
 	if err != nil {
 		log.Printf("查询失败: %v", err)
 		return
 	}
 
-	fmt.Printf("股票总数: %d\n", len(data))
-	fmt.Println("\n前10只股票:")
-	for i, row := range data {
-		if i >= 10 {
-			break
-		}
-		if len(row) > 1 {
-			fmt.Printf("  %s: %s\n", row[0], row[1])
-		}
+	fmt.Printf("股票总数: %d\n", totalCount)
+	if totalCount > 10 {
+		fmt.Println("\n前10只股票已显示...")
 	}
 }
 
-// queryIndexStocksExample 演示指数成分股查询
+// queryIndexStocksExample 演示指数成分股查询（流式）
 func queryIndexStocksExample(client *baostock.Client) {
-	data, err := client.QueryHS300Stocks(context.Background(), "2023-12-29")
+	totalCount := 0
+	count := 0
+
+	err := client.QueryHS300Stocks(context.Background(), "2023-12-29",
+		func(record []string) error {
+			totalCount++
+			if count < 10 && len(record) > 1 {
+				fmt.Printf("  %s: %s\n", record[0], record[1])
+				count++
+			}
+			return nil
+		})
+
 	if err != nil {
 		log.Printf("查询失败: %v", err)
 		return
 	}
 
-	fmt.Printf("沪深300总数: %d\n", len(data))
-	fmt.Println("\n前10只股票:")
-	for i, row := range data {
-		if i >= 10 {
-			break
-		}
-		if len(row) > 1 {
-			fmt.Printf("  %s: %s\n", row[0], row[1])
-		}
+	fmt.Printf("沪深300总数: %d\n", totalCount)
+	if totalCount > 10 {
+		fmt.Println("\n前10只股票已显示...")
 	}
 }

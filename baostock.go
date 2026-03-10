@@ -9,8 +9,8 @@
 //	}
 //	defer client.Logout()
 //
-//	// 查询日线K线数据（使用预定义字段集合）
-//	data, err := client.QueryHistoryKDataPlus(context.Background(),
+//	// 查询日线K线数据（流式处理，内存占用恒定）
+//	err := client.QueryHistoryKDataPlus(context.Background(),
 //	    &baostock.HistoryKDataRequest{
 //	        Code:        "sh.600000",
 //	        Fields:      strings.Join(baostock.DailyKLineCommonFields, ","),
@@ -18,10 +18,15 @@
 //	        EndDate:     "2023-12-31",
 //	        Frequency:   baostock.FrequencyDaily,
 //	        AdjustFlag:  baostock.AdjustFlagNoAdjust,
+//	    },
+//	    func(fields []string, record []string) error {
+//	        // 处理每条记录，如写入文件/数据库/发送到channel
+//	        fmt.Printf("日期: %s, 收盘: %s\n", record[0], record[5])
+//	        return nil // 返回 error 可停止迭代
 //	    })
 //
 //	// 或自定义字段
-//	data, err := client.QueryHistoryKDataPlus(context.Background(),
+//	err := client.QueryHistoryKDataPlus(context.Background(),
 //	    &baostock.HistoryKDataRequest{
 //	        Code:        "sh.600000",
 //	        Fields:      "date,code,open,high,low,close,volume,amount,pctChg",
@@ -29,6 +34,10 @@
 //	        EndDate:     "2023-12-31",
 //	        Frequency:   baostock.FrequencyDaily,
 //	        AdjustFlag:  baostock.AdjustFlagForward, // 前复权
+//	    },
+//	    func(fields []string, record []string) error {
+//	        // 处理每条记录
+//	        return nil
 //	    })
 //
 // 支持的K线频率：
@@ -605,10 +614,15 @@ type HistoryKDataResponse struct {
 	AdjustFlag   string     // 复权标志
 }
 
-// QueryHistoryKDataPlus 查询历史K线数据
+// QueryHistoryKDataPlus 查询历史K线数据（流式）
 //
 // 通过API接口获取A股历史交易数据，支持日K线、周K线、月K线以及5/15/30/60分钟K线数据。
 // 可获取1990-12-19至当前时间的数据，支持前复权、后复权、不复权三种类型。
+//
+// 此方法会自动分页获取数据，对每条记录调用回调函数。优势：
+//   - 边下载边处理，内存占用恒定（只保留一页数据）
+//   - 支持通过回调函数提前终止（返回 error）
+//   - 支持 context 取消，可随时中断下载
 //
 // Fields 参数说明（不同频率支持的字段不同）：
 //
@@ -627,13 +641,33 @@ type HistoryKDataResponse struct {
 //
 // 或自定义字段（逗号分隔）:
 //   req.Fields = "date,code,open,high,low,close,volume,amount"
-func (c *Client) QueryHistoryKDataPlus(ctx context.Context, req *HistoryKDataRequest) (*HistoryKDataResponse, error) {
+//
+// callback 参数：
+//   - fields: 字段名列表
+//   - record: 单条记录数据（与 fields 一一对应）
+//   - 返回 error 可停止迭代（返回的 error 会由本函数返回）
+//
+// 示例：
+//   err := client.QueryHistoryKDataPlus(context.Background(),
+//       &baostock.HistoryKDataRequest{
+//           Code:      "sh.600000",
+//           Fields:    strings.Join(baostock.DailyKLineCommonFields, ","),
+//           StartDate: "2020-01-01",
+//           EndDate:   "2023-12-31",
+//           Frequency: baostock.FrequencyDaily,
+//       },
+//       func(fields []string, record []string) error {
+//           // 处理每条记录，如写入文件/数据库/发送到channel
+//           fmt.Printf("日期: %s, 收盘: %s\n", record[0], record[5])
+//           return nil // 返回 error 可停止迭代
+//       })
+func (c *Client) QueryHistoryKDataPlus(ctx context.Context, req *HistoryKDataRequest, callback func(fields []string, record []string) error) error {
 	if err := c.ensureLogin(); err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := validateStockCode(req.Code); err != nil {
-		return nil, err
+		return err
 	}
 
 	startDate := req.StartDate
@@ -646,28 +680,70 @@ func (c *Client) QueryHistoryKDataPlus(ctx context.Context, req *HistoryKDataReq
 		endDate = time.Now().Format("2006-01-02")
 	}
 
-	// 规范化股票代码
 	code := normalizeStockCode(req.Code)
+	pageNum := 1
+	var allFields []string
 
-	// query_history_k_data_plus\x1用户ID\x1页码\x1每页条数\x1证券代码\x1字段列表\x1开始日期\x1结束日期\x1频率\x1复权标志
-	msgBody := fmt.Sprintf("query_history_k_data_plus%s%s%s1%s%d%s%s%s%s%s%s%s%s%s%s%s%s",
-		MessageSplit, c.userID, MessageSplit, MessageSplit,
-		DefaultPerPageCount, MessageSplit, code, MessageSplit,
-		req.Fields, MessageSplit, startDate, MessageSplit,
-		endDate, MessageSplit, req.Frequency, MessageSplit, req.AdjustFlag)
+	for {
+		// 检查 context 是否已取消
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 
-	resp, err := c.sendMessage(ctx, MsgTypeGetKDataPlusRequest, msgBody)
-	if err != nil {
-		return nil, err
+		// 构建请求消息（带上页码）
+		msgBody := fmt.Sprintf("query_history_k_data_plus%s%s%s%d%s%d%s%s%s%s%s%s%s%s%s%s%s%s",
+			MessageSplit, c.userID, MessageSplit, pageNum, MessageSplit,
+			DefaultPerPageCount, MessageSplit, code, MessageSplit,
+			req.Fields, MessageSplit, startDate, MessageSplit,
+			endDate, MessageSplit, req.Frequency, MessageSplit, req.AdjustFlag)
+
+		resp, err := c.sendMessage(ctx, MsgTypeGetKDataPlusRequest, msgBody)
+		if err != nil {
+			return err
+		}
+
+		result, err := parseHistoryKDataResponse(resp)
+		if err != nil {
+			return err
+		}
+
+		if result.ErrorCode != ErrSuccess {
+			return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
+		}
+
+		// 第一页保存字段列表
+		if pageNum == 1 {
+			allFields = result.Fields
+		}
+
+		// 处理当前页的每条记录
+		for _, record := range result.Data {
+			if err := callback(allFields, record); err != nil {
+				return err
+			}
+		}
+
+		// 检查是否还有更多页
+		// 如果返回的数据量小于每页条数，说明是最后一页
+		if len(result.Data) < DefaultPerPageCount {
+			break
+		}
+
+		pageNum++
 	}
 
-	return parseHistoryKDataResponse(resp)
+	return nil
 }
 
-// QueryTradeDates 查询交易日
-func (c *Client) QueryTradeDates(ctx context.Context, startDate, endDate string) ([][]string, error) {
+// QueryTradeDates 查询交易日（流式）
+//
+// callback 参数：单条记录数据
+// 返回 error 可停止迭代
+func (c *Client) QueryTradeDates(ctx context.Context, startDate, endDate string, callback func(record []string) error) error {
 	if err := c.ensureLogin(); err != nil {
-		return nil, err
+		return err
 	}
 
 	if startDate == "" {
@@ -683,12 +759,12 @@ func (c *Client) QueryTradeDates(ctx context.Context, startDate, endDate string)
 
 	resp, err := c.sendMessage(ctx, MsgTypeQueryTradeDatesRequest, msgBody)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	bodyParts := strings.Split(resp.Body, MessageSplit)
 	if len(bodyParts) < 7 {
-		return nil, errors.New("无效的响应")
+		return errors.New("无效的响应")
 	}
 
 	errorCode := bodyParts[0]
@@ -697,7 +773,7 @@ func (c *Client) QueryTradeDates(ctx context.Context, startDate, endDate string)
 		if len(bodyParts) > 1 {
 			errorMsg = bodyParts[1]
 		}
-		return nil, &Error{Code: errorCode, Message: errorMsg}
+		return &Error{Code: errorCode, Message: errorMsg}
 	}
 
 	// 解析JSON数据
@@ -705,16 +781,26 @@ func (c *Client) QueryTradeDates(ctx context.Context, startDate, endDate string)
 		Data [][]string `json:"record"`
 	}
 	if err := json.Unmarshal([]byte(bodyParts[6]), &result); err != nil {
-		return nil, fmt.Errorf("解析数据JSON失败: %w", err)
+		return fmt.Errorf("解析数据JSON失败: %w", err)
 	}
 
-	return result.Data, nil
+	// 流式处理
+	for _, record := range result.Data {
+		if err := callback(record); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
-// QueryAllStock 查询指定日期的所有股票
-func (c *Client) QueryAllStock(ctx context.Context, date string) ([][]string, error) {
+// QueryAllStock 查询指定日期的所有股票（流式）
+//
+// callback 参数：单条记录数据
+// 返回 error 可停止迭代
+func (c *Client) QueryAllStock(ctx context.Context, date string, callback func(record []string) error) error {
 	if err := c.ensureLogin(); err != nil {
-		return nil, err
+		return err
 	}
 
 	if date == "" {
@@ -727,12 +813,12 @@ func (c *Client) QueryAllStock(ctx context.Context, date string) ([][]string, er
 
 	resp, err := c.sendMessage(ctx, MsgTypeQueryAllStockRequest, msgBody)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	bodyParts := strings.Split(resp.Body, MessageSplit)
 	if len(bodyParts) < 7 {
-		return nil, errors.New("无效的响应")
+		return errors.New("无效的响应")
 	}
 
 	errorCode := bodyParts[0]
@@ -741,7 +827,7 @@ func (c *Client) QueryAllStock(ctx context.Context, date string) ([][]string, er
 		if len(bodyParts) > 1 {
 			errorMsg = bodyParts[1]
 		}
-		return nil, &Error{Code: errorCode, Message: errorMsg}
+		return &Error{Code: errorCode, Message: errorMsg}
 	}
 
 	// 解析JSON数据
@@ -749,21 +835,31 @@ func (c *Client) QueryAllStock(ctx context.Context, date string) ([][]string, er
 		Data [][]string `json:"record"`
 	}
 	if err := json.Unmarshal([]byte(bodyParts[6]), &result); err != nil {
-		return nil, fmt.Errorf("解析数据JSON失败: %w", err)
+		return fmt.Errorf("解析数据JSON失败: %w", err)
 	}
 
-	return result.Data, nil
+	// 流式处理
+	for _, record := range result.Data {
+		if err := callback(record); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
-// QueryStockBasic 查询股票基本信息
-func (c *Client) QueryStockBasic(ctx context.Context, code, codeName string) ([][]string, error) {
+// QueryStockBasic 查询股票基本信息（流式）
+//
+// callback 参数：单条记录数据
+// 返回 error 可停止迭代
+func (c *Client) QueryStockBasic(ctx context.Context, code, codeName string, callback func(record []string) error) error {
 	if err := c.ensureLogin(); err != nil {
-		return nil, err
+		return err
 	}
 
 	if code != "" {
 		if err := validateStockCode(code); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
@@ -776,12 +872,12 @@ func (c *Client) QueryStockBasic(ctx context.Context, code, codeName string) ([]
 
 	resp, err := c.sendMessage(ctx, MsgTypeQueryStockBasicRequest, msgBody)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	bodyParts := strings.Split(resp.Body, MessageSplit)
 	if len(bodyParts) < 7 {
-		return nil, errors.New("无效的响应")
+		return errors.New("无效的响应")
 	}
 
 	errorCode := bodyParts[0]
@@ -790,7 +886,7 @@ func (c *Client) QueryStockBasic(ctx context.Context, code, codeName string) ([]
 		if len(bodyParts) > 1 {
 			errorMsg = bodyParts[1]
 		}
-		return nil, &Error{Code: errorCode, Message: errorMsg}
+		return &Error{Code: errorCode, Message: errorMsg}
 	}
 
 	// 解析JSON数据
@@ -798,21 +894,31 @@ func (c *Client) QueryStockBasic(ctx context.Context, code, codeName string) ([]
 		Data [][]string `json:"record"`
 	}
 	if err := json.Unmarshal([]byte(bodyParts[6]), &result); err != nil {
-		return nil, fmt.Errorf("解析数据JSON失败: %w", err)
+		return fmt.Errorf("解析数据JSON失败: %w", err)
 	}
 
-	return result.Data, nil
+	// 流式处理
+	for _, record := range result.Data {
+		if err := callback(record); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
-// QueryStockIndustry 查询行业分类
-func (c *Client) QueryStockIndustry(ctx context.Context, code, date string) ([][]string, error) {
+// QueryStockIndustry 查询行业分类（流式）
+//
+// callback 参数：单条记录数据
+// 返回 error 可停止迭代
+func (c *Client) QueryStockIndustry(ctx context.Context, code, date string, callback func(record []string) error) error {
 	if err := c.ensureLogin(); err != nil {
-		return nil, err
+		return err
 	}
 
 	if code != "" {
 		if err := validateStockCode(code); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
@@ -825,7 +931,7 @@ func (c *Client) QueryStockIndustry(ctx context.Context, code, date string) ([][
 
 	resp, err := c.sendMessage(ctx, MsgTypeQueryStockIndustryRequest, msgBody)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	result := &struct {
@@ -835,35 +941,51 @@ func (c *Client) QueryStockIndustry(ctx context.Context, code, date string) ([][
 	}{}
 
 	if err := parseStandardResponse(resp, result); err != nil {
-		return nil, err
+		return err
 	}
 
 	if result.ErrorCode != ErrSuccess {
-		return nil, &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
+		return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
 	}
 
-	return result.Data, nil
+	// 流式处理
+	for _, record := range result.Data {
+		if err := callback(record); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
-// QueryHS300Stocks 查询沪深300成分股
-func (c *Client) QueryHS300Stocks(ctx context.Context, date string) ([][]string, error) {
-	return c.queryIndexStocks(ctx, MsgTypeQueryHS300StocksRequest, date)
+// QueryHS300Stocks 查询沪深300成分股（流式）
+//
+// callback 参数：单条记录数据
+// 返回 error 可停止迭代
+func (c *Client) QueryHS300Stocks(ctx context.Context, date string, callback func(record []string) error) error {
+	return c.queryIndexStocks(ctx, MsgTypeQueryHS300StocksRequest, date, callback)
 }
 
-// QuerySZ50Stocks 查询上证50成分股
-func (c *Client) QuerySZ50Stocks(ctx context.Context, date string) ([][]string, error) {
-	return c.queryIndexStocks(ctx, MsgTypeQuerySZ50StocksRequest, date)
+// QuerySZ50Stocks 查询上证50成分股（流式）
+//
+// callback 参数：单条记录数据
+// 返回 error 可停止迭代
+func (c *Client) QuerySZ50Stocks(ctx context.Context, date string, callback func(record []string) error) error {
+	return c.queryIndexStocks(ctx, MsgTypeQuerySZ50StocksRequest, date, callback)
 }
 
-// QueryZZ500Stocks 查询中证500成分股
-func (c *Client) QueryZZ500Stocks(ctx context.Context, date string) ([][]string, error) {
-	return c.queryIndexStocks(ctx, MsgTypeQueryZZ500StocksRequest, date)
+// QueryZZ500Stocks 查询中证500成分股（流式）
+//
+// callback 参数：单条记录数据
+// 返回 error 可停止迭代
+func (c *Client) QueryZZ500Stocks(ctx context.Context, date string, callback func(record []string) error) error {
+	return c.queryIndexStocks(ctx, MsgTypeQueryZZ500StocksRequest, date, callback)
 }
 
 // queryIndexStocks 指数成分股查询辅助方法
-func (c *Client) queryIndexStocks(ctx context.Context, msgType, date string) ([][]string, error) {
+func (c *Client) queryIndexStocks(ctx context.Context, msgType, date string, callback func(record []string) error) error {
 	if err := c.ensureLogin(); err != nil {
-		return nil, err
+		return err
 	}
 
 	if date == "" {
@@ -876,12 +998,12 @@ func (c *Client) queryIndexStocks(ctx context.Context, msgType, date string) ([]
 
 	resp, err := c.sendMessage(ctx, msgType, msgBody)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	bodyParts := strings.Split(resp.Body, MessageSplit)
 	if len(bodyParts) < 7 {
-		return nil, errors.New("无效的响应")
+		return errors.New("无效的响应")
 	}
 
 	errorCode := bodyParts[0]
@@ -890,7 +1012,7 @@ func (c *Client) queryIndexStocks(ctx context.Context, msgType, date string) ([]
 		if len(bodyParts) > 1 {
 			errorMsg = bodyParts[1]
 		}
-		return nil, &Error{Code: errorCode, Message: errorMsg}
+		return &Error{Code: errorCode, Message: errorMsg}
 	}
 
 	// 解析JSON数据
@@ -898,41 +1020,63 @@ func (c *Client) queryIndexStocks(ctx context.Context, msgType, date string) ([]
 		Data [][]string `json:"record"`
 	}
 	if err := json.Unmarshal([]byte(bodyParts[6]), &result); err != nil {
-		return nil, fmt.Errorf("解析数据JSON失败: %w", err)
+		return fmt.Errorf("解析数据JSON失败: %w", err)
 	}
 
-	return result.Data, nil
+	// 流式处理
+	for _, record := range result.Data {
+		if err := callback(record); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
-// QueryDepositRateData 查询存款利率数据
-func (c *Client) QueryDepositRateData(ctx context.Context, startDate, endDate string) ([][]string, error) {
-	return c.queryEconomicData(ctx, MsgTypeQueryDepositRateDataRequest, startDate, endDate, "")
+// QueryDepositRateData 查询存款利率数据（流式）
+//
+// callback 参数：单条记录数据
+// 返回 error 可停止迭代
+func (c *Client) QueryDepositRateData(ctx context.Context, startDate, endDate string, callback func(record []string) error) error {
+	return c.queryEconomicData(ctx, MsgTypeQueryDepositRateDataRequest, startDate, endDate, "", callback)
 }
 
-// QueryLoanRateData 查询贷款利率数据
-func (c *Client) QueryLoanRateData(ctx context.Context, startDate, endDate string) ([][]string, error) {
-	return c.queryEconomicData(ctx, MsgTypeQueryLoanRateDataRequest, startDate, endDate, "")
+// QueryLoanRateData 查询贷款利率数据（流式）
+//
+// callback 参数：单条记录数据
+// 返回 error 可停止迭代
+func (c *Client) QueryLoanRateData(ctx context.Context, startDate, endDate string, callback func(record []string) error) error {
+	return c.queryEconomicData(ctx, MsgTypeQueryLoanRateDataRequest, startDate, endDate, "", callback)
 }
 
-// QueryCPIData 查询CPI数据
-func (c *Client) QueryCPIData(ctx context.Context, startDate, endDate string) ([][]string, error) {
-	return c.queryEconomicData(ctx, MsgTypeQueryCPIDataRequest, startDate, endDate, "")
+// QueryCPIData 查询CPI数据（流式）
+//
+// callback 参数：单条记录数据
+// 返回 error 可停止迭代
+func (c *Client) QueryCPIData(ctx context.Context, startDate, endDate string, callback func(record []string) error) error {
+	return c.queryEconomicData(ctx, MsgTypeQueryCPIDataRequest, startDate, endDate, "", callback)
 }
 
-// QueryPPIData 查询PPI数据
-func (c *Client) QueryPPIData(ctx context.Context, startDate, endDate string) ([][]string, error) {
-	return c.queryEconomicData(ctx, MsgTypeQueryPPIDataRequest, startDate, endDate, "")
+// QueryPPIData 查询PPI数据（流式）
+//
+// callback 参数：单条记录数据
+// 返回 error 可停止迭代
+func (c *Client) QueryPPIData(ctx context.Context, startDate, endDate string, callback func(record []string) error) error {
+	return c.queryEconomicData(ctx, MsgTypeQueryPPIDataRequest, startDate, endDate, "", callback)
 }
 
-// QueryPMIData 查询PMI数据
-func (c *Client) QueryPMIData(ctx context.Context, startDate, endDate string) ([][]string, error) {
-	return c.queryEconomicData(ctx, MsgTypeQueryPMIDataRequest, startDate, endDate, "")
+// QueryPMIData 查询PMI数据（流式）
+//
+// callback 参数：单条记录数据
+// 返回 error 可停止迭代
+func (c *Client) QueryPMIData(ctx context.Context, startDate, endDate string, callback func(record []string) error) error {
+	return c.queryEconomicData(ctx, MsgTypeQueryPMIDataRequest, startDate, endDate, "", callback)
 }
 
 // queryEconomicData 经济数据查询辅助方法
-func (c *Client) queryEconomicData(ctx context.Context, msgType, startDate, endDate, extraParam string) ([][]string, error) {
+func (c *Client) queryEconomicData(ctx context.Context, msgType, startDate, endDate, extraParam string, callback func(record []string) error) error {
 	if err := c.ensureLogin(); err != nil {
-		return nil, err
+		return err
 	}
 
 	msgBody := fmt.Sprintf("economic_data%s%s%s1%s%d%s%s%s%s",
@@ -945,7 +1089,7 @@ func (c *Client) queryEconomicData(ctx context.Context, msgType, startDate, endD
 
 	resp, err := c.sendMessage(ctx, msgType, msgBody)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	result := &struct {
@@ -955,14 +1099,21 @@ func (c *Client) queryEconomicData(ctx context.Context, msgType, startDate, endD
 	}{}
 
 	if err := parseStandardResponse(resp, result); err != nil {
-		return nil, err
+		return err
 	}
 
 	if result.ErrorCode != ErrSuccess {
-		return nil, &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
+		return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
 	}
 
-	return result.Data, nil
+	// 流式处理
+	for _, record := range result.Data {
+		if err := callback(record); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // 辅助函数

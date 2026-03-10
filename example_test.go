@@ -3,6 +3,7 @@ package baostock
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -25,7 +26,7 @@ func TestClientLogin(t *testing.T) {
 	}
 }
 
-// TestClientQueryHistoryKDataPlus 测试查询历史K线数据
+// TestClientQueryHistoryKDataPlus 测试查询历史K线数据（流式）
 func TestClientQueryHistoryKDataPlus(t *testing.T) {
 	client := NewClient()
 
@@ -34,7 +35,10 @@ func TestClientQueryHistoryKDataPlus(t *testing.T) {
 	}
 	defer client.Logout(context.Background())
 
-	data, err := client.QueryHistoryKDataPlus(context.Background(),
+	recordCount := 0
+	var receivedFields []string
+
+	err := client.QueryHistoryKDataPlus(context.Background(),
 		&HistoryKDataRequest{
 			Code:       "sh.600000",
 			Fields:     "date,code,open,high,low,close,volume",
@@ -42,21 +46,107 @@ func TestClientQueryHistoryKDataPlus(t *testing.T) {
 			EndDate:    "2023-12-31",
 			Frequency:  FrequencyDaily,
 			AdjustFlag: AdjustFlagNoAdjust,
+		},
+		func(fields []string, record []string) error {
+			if len(receivedFields) == 0 {
+				receivedFields = fields
+			}
+			recordCount++
+			return nil
 		})
+
 	if err != nil {
 		t.Fatalf("查询K线数据失败: %v", err)
 	}
 
-	if data.ErrorCode != ErrSuccess {
-		t.Fatalf("查询失败: %s", data.ErrorMsg)
-	}
-
-	if len(data.Data) == 0 {
+	if recordCount == 0 {
 		t.Error("应该返回数据")
 	}
 
-	if len(data.Fields) != 7 {
-		t.Errorf("应该有7个字段, 实际: %d", len(data.Fields))
+	if len(receivedFields) != 7 {
+		t.Errorf("应该有7个字段, 实际: %d", len(receivedFields))
+	}
+}
+
+// TestClientQueryHistoryKDataPlusEarlyStop 测试流式查询提前终止
+func TestClientQueryHistoryKDataPlusEarlyStop(t *testing.T) {
+	client := NewClient()
+
+	if err := client.Login(context.Background()); err != nil {
+		t.Fatalf("登录失败: %v", err)
+	}
+	defer client.Logout(context.Background())
+
+	maxRecords := 5
+	recordCount := 0
+
+	err := client.QueryHistoryKDataPlus(context.Background(),
+		&HistoryKDataRequest{
+			Code:       "sh.600000",
+			Fields:     "date,code,open,high,low,close,volume",
+			StartDate:  "2023-12-01",
+			EndDate:    "2023-12-31",
+			Frequency:  FrequencyDaily,
+			AdjustFlag: AdjustFlagNoAdjust,
+		},
+		func(fields []string, record []string) error {
+			recordCount++
+			if recordCount >= maxRecords {
+				return errors.New("stop early")
+			}
+			return nil
+		})
+
+	if err == nil {
+		t.Error("应该返回提前终止的错误")
+	}
+
+	if err != nil && err.Error() != "stop early" {
+		t.Errorf("返回的错误应该是 'stop early', 实际: %v", err)
+	}
+
+	if recordCount != maxRecords {
+		t.Errorf("应该在处理 %d 条记录后停止, 实际处理了: %d", maxRecords, recordCount)
+	}
+}
+
+// TestClientQueryHistoryKDataPlusCancel 测试流式查询 context 取消
+func TestClientQueryHistoryKDataPlusCancel(t *testing.T) {
+	client := NewClient()
+
+	if err := client.Login(context.Background()); err != nil {
+		t.Fatalf("登录失败: %v", err)
+	}
+	defer client.Logout(context.Background())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	recordCount := 0
+	cancelCalled := false
+
+	err := client.QueryHistoryKDataPlus(ctx,
+		&HistoryKDataRequest{
+			Code:       "sh.600000",
+			Fields:     "date,code,open,high,low,close,volume",
+			StartDate:  "2020-01-01", // 大范围数据，用于测试取消
+			EndDate:    "2023-12-31",
+			Frequency:  FrequencyDaily,
+			AdjustFlag: AdjustFlagNoAdjust,
+		},
+		func(fields []string, record []string) error {
+			recordCount++
+			if recordCount >= 10 && !cancelCalled {
+				cancelCalled = true
+				cancel()
+			}
+			return nil
+		})
+
+	if cancelCalled && err != context.Canceled && err != nil {
+		t.Errorf("调用 cancel 后应该返回 context.Canceled, 实际: %v", err)
+	}
+
+	if recordCount < 10 {
+		t.Errorf("应该至少处理10条记录, 实际: %d", recordCount)
 	}
 }
 
@@ -69,22 +159,26 @@ func TestClientQueryTradeDates(t *testing.T) {
 	}
 	defer client.Logout(context.Background())
 
-	data, err := client.QueryTradeDates(context.Background(), "2023-12-01", "2023-12-31")
+	totalDates := 0
+	tradingDays := 0
+
+	err := client.QueryTradeDates(context.Background(), "2023-12-01", "2023-12-31",
+		func(record []string) error {
+			totalDates++
+			if len(record) > 1 && record[1] == "1" {
+				tradingDays++
+			}
+			return nil
+		})
+
 	if err != nil {
 		t.Fatalf("查询交易日失败: %v", err)
 	}
 
-	if len(data) == 0 {
+	if totalDates == 0 {
 		t.Error("应该返回交易日数据")
 	}
 
-	// 12月应该有一些交易日
-	tradingDays := 0
-	for _, row := range data {
-		if len(row) > 1 && row[1] == "1" {
-			tradingDays++
-		}
-	}
 	if tradingDays == 0 {
 		t.Error("12月应该有交易日")
 	}
@@ -99,13 +193,20 @@ func TestClientQueryAllStock(t *testing.T) {
 	}
 	defer client.Logout(context.Background())
 
-	data, err := client.QueryAllStock(context.Background(), "2023-12-29")
+	totalCount := 0
+
+	err := client.QueryAllStock(context.Background(), "2023-12-29",
+		func(record []string) error {
+			totalCount++
+			return nil
+		})
+
 	if err != nil {
 		t.Fatalf("查询所有股票失败: %v", err)
 	}
 
-	if len(data) < 1000 {
-		t.Errorf("股票数量太少: %d", len(data))
+	if totalCount < 1000 {
+		t.Errorf("股票数量太少: %d", totalCount)
 	}
 }
 
@@ -118,13 +219,20 @@ func TestClientQueryHS300Stocks(t *testing.T) {
 	}
 	defer client.Logout(context.Background())
 
-	data, err := client.QueryHS300Stocks(context.Background(), "2023-12-29")
+	totalCount := 0
+
+	err := client.QueryHS300Stocks(context.Background(), "2023-12-29",
+		func(record []string) error {
+			totalCount++
+			return nil
+		})
+
 	if err != nil {
 		t.Fatalf("查询沪深300失败: %v", err)
 	}
 
-	if len(data) != 300 {
-		t.Errorf("沪深300应该有300只股票, 实际: %d", len(data))
+	if totalCount != 300 {
+		t.Errorf("沪深300应该有300只股票, 实际: %d", totalCount)
 	}
 }
 
@@ -137,13 +245,20 @@ func TestClientQuerySZ50Stocks(t *testing.T) {
 	}
 	defer client.Logout(context.Background())
 
-	data, err := client.QuerySZ50Stocks(context.Background(), "2023-12-29")
+	totalCount := 0
+
+	err := client.QuerySZ50Stocks(context.Background(), "2023-12-29",
+		func(record []string) error {
+			totalCount++
+			return nil
+		})
+
 	if err != nil {
 		t.Fatalf("查询上证50失败: %v", err)
 	}
 
-	if len(data) != 50 {
-		t.Errorf("上证50应该有50只股票, 实际: %d", len(data))
+	if totalCount != 50 {
+		t.Errorf("上证50应该有50只股票, 实际: %d", totalCount)
 	}
 }
 
@@ -156,12 +271,19 @@ func TestClientQueryStockBasic(t *testing.T) {
 	}
 	defer client.Logout(context.Background())
 
-	data, err := client.QueryStockBasic(context.Background(), "sh.600000", "")
+	recordCount := 0
+
+	err := client.QueryStockBasic(context.Background(), "sh.600000", "",
+		func(record []string) error {
+			recordCount++
+			return nil
+		})
+
 	if err != nil {
 		t.Fatalf("查询股票基本信息失败: %v", err)
 	}
 
-	if len(data) == 0 {
+	if recordCount == 0 {
 		t.Error("应该返回股票基本信息")
 	}
 }
@@ -223,15 +345,20 @@ func TestClientQuerySTStocks(t *testing.T) {
 	}
 	defer client.Logout(context.Background())
 
-	data, err := client.QuerySTStocks(context.Background(), "2023-12-29")
+	recordCount := 0
+
+	err := client.QuerySTStocks(context.Background(), "2023-12-29",
+		func(record []string) error {
+			recordCount++
+			return nil
+		})
+
 	if err != nil {
 		t.Fatalf("查询ST股票失败: %v", err)
 	}
 
 	// ST股票数量可能为0，所以只检查查询成功
-	if data == nil {
-		t.Error("应该返回数据")
-	}
+	// 只要没有错误就算成功
 }
 
 // TestClientWithCustomConfig 测试自定义配置
@@ -261,12 +388,11 @@ func TestClientWithCustomConfig(t *testing.T) {
 func ExampleClient_basicUsage() {
 	client := NewClient()
 
-	// 登录
 	client.Login(context.Background())
 	defer client.Logout(context.Background())
 
-	// 查询历史K线数据
-	data, _ := client.QueryHistoryKDataPlus(context.Background(),
+	// 流式查询历史K线数据
+	_ = client.QueryHistoryKDataPlus(context.Background(),
 		&HistoryKDataRequest{
 			Code:       "sh.600000",
 			Fields:     "date,code,open,high,low,close,volume",
@@ -274,12 +400,11 @@ func ExampleClient_basicUsage() {
 			EndDate:    "2023-12-31",
 			Frequency:  FrequencyDaily,
 			AdjustFlag: AdjustFlagNoAdjust,
+		},
+		func(fields []string, record []string) error {
+			// 处理每条记录
+			return nil
 		})
-
-	_ = data.ErrorCode
-	_ = data.ErrorMsg
-	_ = data.Fields
-	_ = len(data.Data)
 }
 
 func ExampleClient_queryTradeDates() {
@@ -288,12 +413,12 @@ func ExampleClient_queryTradeDates() {
 	client.Login(context.Background())
 	defer client.Logout(context.Background())
 
-	data, _ := client.QueryTradeDates(context.Background(), "2023-01-01", "2023-01-31")
-
-	for _, row := range data {
-		_ = row[0]
-		_ = row[1]
-	}
+	_ = client.QueryTradeDates(context.Background(), "2023-01-01", "2023-01-31",
+		func(record []string) error {
+			_ = record[0]
+			_ = record[1]
+			return nil
+		})
 }
 
 func ExampleClient_queryAllStock() {
@@ -302,12 +427,14 @@ func ExampleClient_queryAllStock() {
 	client.Login(context.Background())
 	defer client.Logout(context.Background())
 
-	data, _ := client.QueryAllStock(context.Background(), "2023-12-29")
-
-	_ = len(data)
-	for _, row := range data {
-		_, _, _ = row[0], row[1], row[6]
-	}
+	count := 0
+	_ = client.QueryAllStock(context.Background(), "2023-12-29",
+		func(record []string) error {
+			count++
+			_, _, _ = record[0], record[1], record[6]
+			return nil
+		})
+	_ = count
 }
 
 func ExampleClient_queryStockBasic() {
@@ -316,11 +443,11 @@ func ExampleClient_queryStockBasic() {
 	client.Login(context.Background())
 	defer client.Logout(context.Background())
 
-	data, _ := client.QueryStockBasic(context.Background(), "sh.600000", "")
-
-	for _, row := range data {
-		_, _, _ = row[0], row[1], row[7]
-	}
+	_ = client.QueryStockBasic(context.Background(), "sh.600000", "",
+		func(record []string) error {
+			_, _, _ = record[0], record[1], record[7]
+			return nil
+		})
 }
 
 func ExampleClient_queryHS300Stocks() {
@@ -329,12 +456,11 @@ func ExampleClient_queryHS300Stocks() {
 	client.Login(context.Background())
 	defer client.Logout(context.Background())
 
-	data, _ := client.QueryHS300Stocks(context.Background(), "2023-12-29")
-
-	_ = len(data)
-	for _, row := range data {
-		_, _ = row[0], row[1]
-	}
+	_ = client.QueryHS300Stocks(context.Background(), "2023-12-29",
+		func(record []string) error {
+			_, _ = record[0], record[1]
+			return nil
+		})
 }
 
 func ExampleClient_queryDepositRate() {
@@ -343,11 +469,11 @@ func ExampleClient_queryDepositRate() {
 	client.Login(context.Background())
 	defer client.Logout(context.Background())
 
-	data, _ := client.QueryDepositRateData(context.Background(), "2020-01-01", "2023-12-31")
-
-	for _, row := range data {
-		_, _ = row[0], row[1]
-	}
+	_ = client.QueryDepositRateData(context.Background(), "2020-01-01", "2023-12-31",
+		func(record []string) error {
+			_, _ = record[0], record[1]
+			return nil
+		})
 }
 
 func ExampleClient_withCustomConfig() {
@@ -364,7 +490,6 @@ func ExampleClient_withCustomConfig() {
 	client.Login(context.Background())
 	defer client.Logout(context.Background())
 
-	// 使用客户端...
 	_ = client
 }
 
@@ -373,7 +498,6 @@ func Example_errorHandling() {
 
 	err := client.Login(context.Background())
 	if err != nil {
-		// 检查是否为BaoStock错误
 		var bsErr *Error
 		if errors.As(err, &bsErr) {
 			_ = bsErr.Code
@@ -383,8 +507,7 @@ func Example_errorHandling() {
 	}
 	defer client.Logout(context.Background())
 
-	// 带错误处理的查询
-	data, _ := client.QueryHistoryKDataPlus(context.Background(),
+	_ = client.QueryHistoryKDataPlus(context.Background(),
 		&HistoryKDataRequest{
 			Code:       "sh.600000",
 			Fields:     "date,code,open,high,low,close,volume",
@@ -392,11 +515,10 @@ func Example_errorHandling() {
 			EndDate:    "2023-12-31",
 			Frequency:  FrequencyDaily,
 			AdjustFlag: AdjustFlagNoAdjust,
+		},
+		func(fields []string, record []string) error {
+			return nil
 		})
-
-	_ = data.ErrorCode
-	_ = data.ErrorMsg
-	_ = len(data.Data)
 }
 
 func ExampleClient_queryProfitData() {
@@ -444,12 +566,36 @@ func ExampleClient_querySTStocks() {
 	client.Login(context.Background())
 	defer client.Logout(context.Background())
 
-	data, _ := client.QuerySTStocks(context.Background(), "2023-12-29")
+	_ = client.QuerySTStocks(context.Background(), "2023-12-29",
+		func(record []string) error {
+			_, _ = record[0], record[1]
+			return nil
+		})
+}
 
-	_ = len(data)
-	for _, row := range data {
-		_, _ = row[0], row[1]
-	}
+// ExampleClient_queryHistoryKDataPlus 流式查询K线数据示例
+func ExampleClient_queryHistoryKDataPlus() {
+	client := NewClient()
+
+	client.Login(context.Background())
+	defer client.Logout(context.Background())
+
+	// 使用预定义字段集合
+	_ = client.QueryHistoryKDataPlus(context.Background(),
+		&HistoryKDataRequest{
+			Code:       "sh.600000",
+			Fields:     strings.Join(DailyKLineCommonFields, ","),
+			StartDate:  "2023-01-01",
+			EndDate:    "2023-12-31",
+			Frequency:  FrequencyDaily,
+			AdjustFlag: AdjustFlagForward,
+		},
+		func(fields []string, record []string) error {
+			// 处理每条记录，如写入文件或数据库
+			_ = fields
+			_ = record
+			return nil
+		})
 }
 
 // TestErrorString 测试错误类型的字符串输出
@@ -617,98 +763,83 @@ func TestClientSixDigitStockCode(t *testing.T) {
 	defer client.Logout(context.Background())
 
 	t.Run("上海6位代码", func(t *testing.T) {
-		// 测试使用6位代码查询上海股票K线数据
-		data, err := client.QueryHistoryKDataPlus(context.Background(),
+		var returnedCode string
+		err := client.QueryHistoryKDataPlus(context.Background(),
 			&HistoryKDataRequest{
-				Code:       "600000", // 6位代码，应自动添加 sh. 前缀
+				Code:       "600000",
 				Fields:     "date,code,open,high,low,close",
 				StartDate:  "2023-12-01",
 				EndDate:    "2023-12-31",
 				Frequency:  FrequencyDaily,
 				AdjustFlag: AdjustFlagNoAdjust,
+			},
+			func(fields []string, record []string) error {
+				if len(record) > 1 {
+					returnedCode = record[1]
+				}
+				return nil // 只获取第一条
 			})
+
 		if err != nil {
 			t.Fatalf("查询K线数据失败: %v", err)
 		}
 
-		if data.ErrorCode != ErrSuccess {
-			t.Fatalf("查询失败: %s", data.ErrorMsg)
-		}
-
-		if len(data.Data) == 0 {
-			t.Error("应该返回数据")
-		}
-
-		// 验证返回的代码是规范化后的格式 (sh.600000)
-		if len(data.Data) > 0 && len(data.Data[0]) > 1 {
-			returnedCode := data.Data[0][1]
-			if returnedCode != "sh.600000" {
-				t.Errorf("返回的代码应该是 sh.600000, 实际是: %s", returnedCode)
-			}
+		if returnedCode != "sh.600000" {
+			t.Errorf("返回的代码应该是 sh.600000, 实际是: %s", returnedCode)
 		}
 	})
 
 	t.Run("深圳6位代码", func(t *testing.T) {
-		// 测试使用6位代码查询深圳股票K线数据
-		data, err := client.QueryHistoryKDataPlus(context.Background(),
+		var returnedCode string
+		err := client.QueryHistoryKDataPlus(context.Background(),
 			&HistoryKDataRequest{
-				Code:       "000001", // 平安银行，应自动添加 sz. 前缀
+				Code:       "000001",
 				Fields:     "date,code,open,high,low,close",
 				StartDate:  "2023-12-01",
 				EndDate:    "2023-12-31",
 				Frequency:  FrequencyDaily,
 				AdjustFlag: AdjustFlagNoAdjust,
+			},
+			func(fields []string, record []string) error {
+				if len(record) > 1 {
+					returnedCode = record[1]
+				}
+				return nil
 			})
+
 		if err != nil {
 			t.Fatalf("查询K线数据失败: %v", err)
 		}
 
-		if data.ErrorCode != ErrSuccess {
-			t.Fatalf("查询失败: %s", data.ErrorMsg)
-		}
-
-		if len(data.Data) == 0 {
-			t.Error("应该返回数据")
-		}
-
-		// 验证返回的代码是规范化后的格式 (sz.000001)
-		if len(data.Data) > 0 && len(data.Data[0]) > 1 {
-			returnedCode := data.Data[0][1]
-			if returnedCode != "sz.000001" {
-				t.Errorf("返回的代码应该是 sz.000001, 实际是: %s", returnedCode)
-			}
+		if returnedCode != "sz.000001" {
+			t.Errorf("返回的代码应该是 sz.000001, 实际是: %s", returnedCode)
 		}
 	})
 
 	t.Run("创业板6位代码", func(t *testing.T) {
-		// 测试使用6位代码查询创业板股票K线数据
-		data, err := client.QueryHistoryKDataPlus(context.Background(),
+		var returnedCode string
+		err := client.QueryHistoryKDataPlus(context.Background(),
 			&HistoryKDataRequest{
-				Code:       "300001", // 特锐德，应自动添加 sz. 前缀
+				Code:       "300001",
 				Fields:     "date,code,open,high,low,close",
 				StartDate:  "2023-12-01",
 				EndDate:    "2023-12-31",
 				Frequency:  FrequencyDaily,
 				AdjustFlag: AdjustFlagNoAdjust,
+			},
+			func(fields []string, record []string) error {
+				if len(record) > 1 {
+					returnedCode = record[1]
+				}
+				return nil
 			})
+
 		if err != nil {
 			t.Fatalf("查询K线数据失败: %v", err)
 		}
 
-		if data.ErrorCode != ErrSuccess {
-			t.Fatalf("查询失败: %s", data.ErrorMsg)
-		}
-
-		if len(data.Data) == 0 {
-			t.Error("应该返回数据")
-		}
-
-		// 验证返回的代码是规范化后的格式 (sz.300001)
-		if len(data.Data) > 0 && len(data.Data[0]) > 1 {
-			returnedCode := data.Data[0][1]
-			if returnedCode != "sz.300001" {
-				t.Errorf("返回的代码应该是 sz.300001, 实际是: %s", returnedCode)
-			}
+		if returnedCode != "sz.300001" {
+			t.Errorf("返回的代码应该是 sz.300001, 实际是: %s", returnedCode)
 		}
 	})
 }
