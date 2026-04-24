@@ -78,9 +78,9 @@ import (
 // 协议常量
 const (
 	// 服务器配置
-	DefaultServerHost = "www.baostock.com"
+	DefaultServerHost = "public-api.baostock.com"
 	DefaultServerPort = 10030
-	ClientVersion     = "00.8.90"
+	ClientVersion     = "0.9.1"
 
 	// 消息分隔符
 	MessageSplit = "\x01" // ASCII 0x01
@@ -548,34 +548,37 @@ type LoginResponse struct {
 // 可用字段列表：
 //
 // 日线字段（包含停牌证券，18个）：
-//   date       - 交易所行情日期，格式：YYYY-MM-DD
-//   code       - 证券代码，格式：sh.600000 或 sz.000001
-//   open       - 开盘价，精度：小数点后4位，单位：人民币元
-//   high       - 最高价，精度：小数点后4位，单位：人民币元
-//   low        - 最低价，精度：小数点后4位，单位：人民币元
-//   close      - 收盘价，精度：小数点后4位，单位：人民币元
-//   preclose   - 昨日收盘价，精度：小数点后4位，单位：人民币元
-//   volume     - 成交数量，单位：股
-//   amount     - 成交金额，精度：小数点后4位，单位：人民币元
-//   adjustflag - 复权状态：1=后复权，2=前复权，3=不复权
-//   turn       - 换手率，精度：小数点后6位，单位：%
-//   tradestatus- 交易状态：1=正常交易，0=停牌
-//   pctChg     - 涨跌幅（百分比），精度：小数点后6位
-//   peTTM      - 滚动市盈率，精度：小数点后6位
-//   psTTM      - 滚动市销率，精度：小数点后6位
-//   pcfNcfTTM  - 滚动市现率，精度：小数点后6位
-//   pbMRQ      - 市净率，精度：小数点后6位
-//   isST       - 是否ST股：1=是，0=否
+//
+//	date       - 交易所行情日期，格式：YYYY-MM-DD
+//	code       - 证券代码，格式：sh.600000 或 sz.000001
+//	open       - 开盘价，精度：小数点后4位，单位：人民币元
+//	high       - 最高价，精度：小数点后4位，单位：人民币元
+//	low        - 最低价，精度：小数点后4位，单位：人民币元
+//	close      - 收盘价，精度：小数点后4位，单位：人民币元
+//	preclose   - 昨日收盘价，精度：小数点后4位，单位：人民币元
+//	volume     - 成交数量，单位：股
+//	amount     - 成交金额，精度：小数点后4位，单位：人民币元
+//	adjustflag - 复权状态：1=后复权，2=前复权，3=不复权
+//	turn       - 换手率，精度：小数点后6位，单位：%
+//	tradestatus- 交易状态：1=正常交易，0=停牌
+//	pctChg     - 涨跌幅（百分比），精度：小数点后6位
+//	peTTM      - 滚动市盈率，精度：小数点后6位
+//	psTTM      - 滚动市销率，精度：小数点后6位
+//	pcfNcfTTM  - 滚动市现率，精度：小数点后6位
+//	pbMRQ      - 市净率，精度：小数点后6位
+//	isST       - 是否ST股：1=是，0=否
 //
 // 周月线字段（11个）：
-//   date, code, open, high, low, close, volume, amount,
-//   adjustflag, turn, pctChg
+//
+//	date, code, open, high, low, close, volume, amount,
+//	adjustflag, turn, pctChg
 //
 // 分钟线字段（5/15/30/60分钟，10个）：
-//   date       - 交易所行情日期，格式：YYYY-MM-DD
-//   time       - 交易所行情时间，格式：YYYYMMDDHHMMSSsss
-//   code       - 证券代码
-//   open, high, low, close, volume, amount, adjustflag
+//
+//	date       - 交易所行情日期，格式：YYYY-MM-DD
+//	time       - 交易所行情时间，格式：YYYYMMDDHHMMSSsss
+//	code       - 证券代码
+//	open, high, low, close, volume, amount, adjustflag
 //
 // 注意：
 //   - 指数没有分钟线数据
@@ -584,10 +587,11 @@ type LoginResponse struct {
 //   - 分钟线数据不包含指数
 //
 // 示例：
-//   // 日线查询（使用预定义字段集合）
-//   req.Fields = strings.Join(baostock.DailyKLineFields, ",")
-//   或自定义字段:
-//   req.Fields = "date,code,open,high,low,close,volume,amount"
+//
+//	// 日线查询（使用预定义字段集合）
+//	req.Fields = strings.Join(baostock.DailyKLineFields, ",")
+//	或自定义字段:
+//	req.Fields = "date,code,open,high,low,close,volume,amount"
 type HistoryKDataRequest struct {
 	Code       string     // 证券代码，如 "sh.600000" 或 "sz.000001"
 	Fields     string     // 字段列表，用逗号分隔，如 "date,code,open,high,low,close"
@@ -627,20 +631,25 @@ type HistoryKDataResponse struct {
 // Fields 参数说明（不同频率支持的字段不同）：
 //
 // 日线字段（18个）:
-//   date,code,open,high,low,close,preclose,volume,amount,adjustflag,
-//   turn,tradestatus,pctChg,peTTM,psTTM,pcfNcfTTM,pbMRQ,isST
+//
+//	date,code,open,high,low,close,preclose,volume,amount,adjustflag,
+//	turn,tradestatus,pctChg,peTTM,psTTM,pcfNcfTTM,pbMRQ,isST
 //
 // 周月线字段（11个）:
-//   date,code,open,high,low,close,volume,amount,adjustflag,turn,pctChg
+//
+//	date,code,open,high,low,close,volume,amount,adjustflag,turn,pctChg
 //
 // 分钟线字段（10个）:
-//   date,time,code,open,high,low,close,volume,amount,adjustflag
+//
+//	date,time,code,open,high,low,close,volume,amount,adjustflag
 //
 // 使用预定义字段集合示例:
-//   req.Fields = strings.Join(baostock.DailyKLineCommonFields, ",")
+//
+//	req.Fields = strings.Join(baostock.DailyKLineCommonFields, ",")
 //
 // 或自定义字段（逗号分隔）:
-//   req.Fields = "date,code,open,high,low,close,volume,amount"
+//
+//	req.Fields = "date,code,open,high,low,close,volume,amount"
 //
 // callback 参数：
 //   - fields: 字段名列表
@@ -648,19 +657,20 @@ type HistoryKDataResponse struct {
 //   - 返回 error 可停止迭代（返回的 error 会由本函数返回）
 //
 // 示例：
-//   err := client.QueryHistoryKDataPlus(context.Background(),
-//       &baostock.HistoryKDataRequest{
-//           Code:      "sh.600000",
-//           Fields:    strings.Join(baostock.DailyKLineCommonFields, ","),
-//           StartDate: "2020-01-01",
-//           EndDate:   "2023-12-31",
-//           Frequency: baostock.FrequencyDaily,
-//       },
-//       func(fields []string, record []string) error {
-//           // 处理每条记录，如写入文件/数据库/发送到channel
-//           fmt.Printf("日期: %s, 收盘: %s\n", record[0], record[5])
-//           return nil // 返回 error 可停止迭代
-//       })
+//
+//	err := client.QueryHistoryKDataPlus(context.Background(),
+//	    &baostock.HistoryKDataRequest{
+//	        Code:      "sh.600000",
+//	        Fields:    strings.Join(baostock.DailyKLineCommonFields, ","),
+//	        StartDate: "2020-01-01",
+//	        EndDate:   "2023-12-31",
+//	        Frequency: baostock.FrequencyDaily,
+//	    },
+//	    func(fields []string, record []string) error {
+//	        // 处理每条记录，如写入文件/数据库/发送到channel
+//	        fmt.Printf("日期: %s, 收盘: %s\n", record[0], record[5])
+//	        return nil // 返回 error 可停止迭代
+//	    })
 func (c *Client) QueryHistoryKDataPlus(ctx context.Context, req *HistoryKDataRequest, callback func(fields []string, record []string) error) error {
 	if err := c.ensureLogin(); err != nil {
 		return err
@@ -1053,7 +1063,7 @@ func (c *Client) queryEconomicData(ctx context.Context, msgType, startDate, endD
 	result := &struct {
 		ErrorCode string `json:"-"`
 		ErrorMsg  string `json:"-"`
-		jsonData   string `json:"-"`
+		jsonData  string `json:"-"`
 	}{}
 
 	if err := parseStandardResponse(resp, result); err != nil {
