@@ -1,3 +1,3 @@
-module github.com/millken/baostock
+module github.com/alqbib/baostock
 
 go 1.24
