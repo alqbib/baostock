@@ -7,7 +7,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/millken/baostock"
+	"github.com/alqbib/baostock"
 )
 
 func main() {

@@ -80,7 +80,7 @@ const (
 	// 服务器配置
 	DefaultServerHost = "public-api.baostock.com"
 	DefaultServerPort = 10030
-	ClientVersion     = "00.8.90"
+	ClientVersion     = "00.9.10"
 
 	// 消息分隔符
 	MessageSplit = "\x01" // ASCII 0x01
