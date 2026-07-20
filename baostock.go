@@ -80,7 +80,7 @@ const (
 	// 服务器配置
 	DefaultServerHost = "public-api.baostock.com"
 	DefaultServerPort = 10030
-	ClientVersion     = "00.9.10"
+	ClientVersion     = "00.9.30"
 
 	// 消息分隔符
 	MessageSplit = "\x01" // ASCII 0x01
@@ -188,6 +188,13 @@ const (
 	// 风险警示
 	MsgTypeQueryStockInRiskRequest  = "93"
 	MsgTypeQueryStockInRiskResponse = "94"
+
+	MsgTypeGetKDailyDAStockRequest       = "98" // 获取某日所有股票日K线数据的请求
+	MsgTypeGetKDailyDAStockResponse      = "99" // 获取某日所有股票日K线数据的响应
+	Msg_Type_GetKDailyDETFRequest        = "9A" // 获取某日所有ETF日K线数据的请求
+	Msg_Type_GetKDailyDETFResponse       = "9B" // 获取某日所有ETF日K线数据的响应
+	MsgTypeGetKDailyAdjustFactorRequest  = "9C" // 获取某日复权因子信息数据的请求
+	MsgTypeGetKDailyAdjustFactorResponse = "9D" // 获取某日复权因子信息数据的响应
 
 	// 宏观经济数据
 	MsgTypeQueryDepositRateDataRequest           = "47"
@@ -445,7 +452,7 @@ func (c *Client) receiveResponse(ctx context.Context) (*Response, error) {
 			if len(headerParts) >= 2 {
 				msgType := headerParts[1]
 				// 检查是否是压缩消息类型
-				isCompressed := (msgType == MsgTypeGetKDataPlusResponse)
+				isCompressed := (msgType == MsgTypeGetKDataPlusResponse || msgType == MsgTypeGetKDailyDAStockResponse)
 
 				if isCompressed && strings.HasSuffix(str, "<![CDATA[]]>\n") {
 					break
@@ -475,7 +482,7 @@ func (c *Client) receiveResponse(ctx context.Context) (*Response, error) {
 	msgType := headerParts[1]
 
 	// 处理压缩响应
-	if msgType == MsgTypeGetKDataPlusResponse {
+	if msgType == MsgTypeGetKDataPlusResponse || msgType == MsgTypeGetKDailyDAStockResponse {
 		// 对于压缩响应，数据格式为: header + [压缩数据]\x1[CRC32]<![CDATA[]]>\n
 		// 需要从完整响应中找到 <![CDATA[ 的位置
 		before, _, ok := strings.Cut(responseStr, "<![CDATA[")
@@ -618,6 +625,15 @@ type HistoryKDataResponse struct {
 	AdjustFlag   string     // 复权标志
 }
 
+type DailyHistoryKAStockResponse struct {
+	ErrorCode string     // 错误代码
+	ErrorMsg  string     // 错误信息
+	Method    string     // 方法名
+	UserID    string     // 用户ID
+	Data      [][]string // 数据
+	Fields    []string   // 字段列表
+}
+
 // QueryHistoryKDataPlus 查询历史K线数据（流式）
 //
 // 通过API接口获取A股历史交易数据，支持日K线、周K线、月K线以及5/15/30/60分钟K线数据。
@@ -744,6 +760,81 @@ func (c *Client) QueryHistoryKDataPlus(ctx context.Context, req *HistoryKDataReq
 		pageNum++
 	}
 
+	return nil
+}
+
+// QueryDailyHistoryKAStock 获取某日所有股票日K线数据
+//
+// 通过API接口获取A股历史交易数据，可以通过参数设置获取指定日期A股日k线数据，适合搭配均线数据进行选股和分析。
+//
+// 此方法会自动分页获取数据，对每条记录调用回调函数。优势：
+//   - 边下载边处理，内存占用恒定（只保留一页数据）
+//   - 支持通过回调函数提前终止（返回 error）
+//   - 支持 context 取消，可随时中断下载
+//
+// Fields 参数说明（不同频率支持的字段不同）：
+//
+// date：获取日期，格式“YYYY-MM-DD”，为空时取当前自然日；
+//
+// callback 参数：
+//   - fields: 字段名列表
+//   - record: 单条记录数据（与 fields 一一对应）
+//   - 返回 error 可停止迭代（返回的 error 会由本函数返回）
+//
+// 注意：
+// 股票停牌时，对于日线，开、高、低、收价都相同，且都为前一交易日的收盘价，成交量、成交额为0，换手率为空。
+//
+// 示例：
+//
+//	err := client.QueryDailyHistoryKAStock(context.Background(),
+//	    &baostock.HistoryKDataRequest{
+//	        Code:      "sh.600000",
+//	        Fields:    strings.Join(baostock.DailyKLineCommonFields, ","),
+//	        StartDate: "2020-01-01",
+//	        EndDate:   "2023-12-31",
+//	        Frequency: baostock.FrequencyDaily,
+//	    },
+//	    func(fields []string, record []string) error {
+//	        // 处理每条记录，如写入文件/数据库/发送到channel
+//	        fmt.Printf("日期: %s, 收盘: %s\n", record[0], record[5])
+//	        return nil // 返回 error 可停止迭代
+//	    })
+func (c *Client) QueryDailyHistoryKAStock(ctx context.Context, tradeDate string, callback func(fields []string, records []string) error) error {
+	if err := c.ensureLogin(); err != nil {
+		return err
+	}
+	if tradeDate == "" {
+		tradeDate = time.Now().Format("2006-01-02")
+	}
+
+	// 检查 context 是否已取消
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// 构建请求消息（带上页码）
+	msgBody := fmt.Sprintf("query_daily_history_k_AStock%s%s%s%s",
+		MessageSplit, c.userID, MessageSplit, tradeDate)
+
+	resp, err := c.sendMessage(ctx, MsgTypeGetKDailyDAStockRequest, msgBody)
+	if err != nil {
+		return err
+	}
+	result, err := parseDailyHistoryKAStockResponse(resp)
+	if err != nil {
+		return err
+	}
+	if result.ErrorCode != ErrSuccess {
+		return &Error{Code: result.ErrorCode, Message: result.ErrorMsg}
+	}
+	// 处理当前页的每条记录
+	for _, record := range result.Data {
+		if err = callback(result.Fields, record); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1118,6 +1209,40 @@ func parseLoginResponse(resp *Response, result *LoginResponse) error {
 	result.UserID = bodyParts[3]
 
 	return nil
+}
+
+func parseDailyHistoryKAStockResponse(resp *Response) (*DailyHistoryKAStockResponse, error) {
+	bodyParts := strings.Split(resp.Body, MessageSplit)
+	if len(bodyParts) < 5 {
+		return nil, errors.New("无效的某日所有股票日K线数据响应")
+	}
+
+	result := &DailyHistoryKAStockResponse{
+		ErrorCode: bodyParts[0],
+		ErrorMsg:  bodyParts[1],
+		Method:    bodyParts[2],
+		UserID:    bodyParts[3],
+	}
+
+	record := strings.TrimSpace(bodyParts[4])
+	if record != "" {
+		var parsedData struct {
+			Record [][]string `json:"record"`
+		}
+		recordArr := strings.Fields(record)
+		if err := json.Unmarshal([]byte(strings.Join(recordArr, "")), &parsedData); err != nil {
+			return nil, fmt.Errorf("解析数据JSON失败: %w", err)
+		}
+		result.Data = parsedData.Record
+	}
+
+	fieldArr := strings.Split(bodyParts[5], ",")
+	for i, _ := range fieldArr {
+		fieldArr[i] = strings.TrimSpace(fieldArr[i])
+	}
+	result.Fields = fieldArr
+
+	return result, nil
 }
 
 func parseHistoryKDataResponse(resp *Response) (*HistoryKDataResponse, error) {

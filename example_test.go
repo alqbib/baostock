@@ -3,6 +3,7 @@ package baostock
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -872,4 +873,19 @@ func TestNormalizeStockCode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestQueryDailyHistoryKAStock(t *testing.T) {
+	client := NewClient()
+
+	if err := client.Login(context.Background()); err != nil {
+		t.Fatalf("登录失败: %v", err)
+	}
+	defer client.Logout(context.Background())
+
+	_ = client.QueryDailyHistoryKAStock(context.Background(), "2026-07-13", func(fields []string, records []string) error {
+		fmt.Println(fields)
+		fmt.Println(records)
+		return nil
+	})
 }
