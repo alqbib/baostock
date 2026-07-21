@@ -767,12 +767,7 @@ func (c *Client) QueryHistoryKDataPlus(ctx context.Context, req *HistoryKDataReq
 //
 // 通过API接口获取A股历史交易数据，可以通过参数设置获取指定日期A股日k线数据，适合搭配均线数据进行选股和分析。
 //
-// 此方法会自动分页获取数据，对每条记录调用回调函数。优势：
-//   - 边下载边处理，内存占用恒定（只保留一页数据）
-//   - 支持通过回调函数提前终止（返回 error）
-//   - 支持 context 取消，可随时中断下载
-//
-// Fields 参数说明（不同频率支持的字段不同）：
+// 参数说明：
 //
 // date：获取日期，格式“YYYY-MM-DD”，为空时取当前自然日；
 //
@@ -786,19 +781,11 @@ func (c *Client) QueryHistoryKDataPlus(ctx context.Context, req *HistoryKDataReq
 //
 // 示例：
 //
-//	err := client.QueryDailyHistoryKAStock(context.Background(),
-//	    &baostock.HistoryKDataRequest{
-//	        Code:      "sh.600000",
-//	        Fields:    strings.Join(baostock.DailyKLineCommonFields, ","),
-//	        StartDate: "2020-01-01",
-//	        EndDate:   "2023-12-31",
-//	        Frequency: baostock.FrequencyDaily,
-//	    },
-//	    func(fields []string, record []string) error {
-//	        // 处理每条记录，如写入文件/数据库/发送到channel
-//	        fmt.Printf("日期: %s, 收盘: %s\n", record[0], record[5])
-//	        return nil // 返回 error 可停止迭代
-//	    })
+//	err := client.QueryDailyHistoryKAStock(context.Background(), "2026-07-13", func(fields []string, records []string) error {
+//		 fmt.Println(fields)
+//		 fmt.Println(records)
+//		 return nil
+//	})
 func (c *Client) QueryDailyHistoryKAStock(ctx context.Context, tradeDate string, callback func(fields []string, records []string) error) error {
 	if err := c.ensureLogin(); err != nil {
 		return err
